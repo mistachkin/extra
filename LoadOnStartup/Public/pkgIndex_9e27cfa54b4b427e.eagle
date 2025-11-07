@@ -28,6 +28,9 @@ package ifneeded Eagle.Secrets 1.0 \
 package ifneeded Eagle.Chat 1.0 \
     [list source -library true -- [file join $dir chat.eagle]]
 
+package ifneeded Eagle.Execute.Pipes 1.0 \
+    [list source -library true -- [file join $dir execPipes.eagle]]
+
 package ifneeded Eagle.Sms 1.0 \
     [list source -library true -- [file join $dir sms.eagle]]
 

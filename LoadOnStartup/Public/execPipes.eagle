@@ -1,0 +1,300 @@
+###############################################################################
+#
+# execPipes.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Execute (With Pipes) Package File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Eagle {
+  proc createExecSubCommandList { optionsVarName args } {
+    upvar 1 $optionsVarName options
+
+    set subCommands [list]; set subCommand [list]
+    set endIndex [expr {[llength $args] - 1}]
+
+    for {set index 0} {$index <= $endIndex} {incr index} {
+      set arg [lindex $args $index]
+
+      if {$arg eq "|"} then {
+        if {$index == 0 || $index == $endIndex} then {
+          error "cannot use pipe at start or end of pipeline"
+        }
+
+        if {[llength $subCommand] == 0} then {
+          error "missing previous command for pipe"
+        }
+
+        lappend subCommands $subCommand; set subCommand [list]
+      } else {
+        if {$index == $endIndex && $arg eq "&"} then {
+          set options(-background) $endIndex
+        } else {
+          lappend subCommand [string map [list || | && &] $arg]
+        }
+      }
+    }
+
+    if {[llength $subCommand] > 0} then {
+      lappend subCommands $subCommand; set subCommand [list]
+    }
+
+    return $subCommands
+  }
+
+  proc checkForDisallowedExecCommandListOptions {
+          optionsVarName captureOptions } {
+    upvar 1 $optionsVarName options
+
+    object foreach -alias pair $captureOptions {
+      set key [$pair Key]
+
+      if {[info exists options($key)]} then {
+        error [appendArgs \
+            "cannot use \"" $key "\" with pipeline"]
+      }
+    }
+  }
+
+  proc createExecCommandList {
+          sentinel optionsVarName captureOptions subCommands } {
+    upvar 1 $optionsVarName options
+
+    checkForDisallowedExecCommandListOptions options $captureOptions
+
+    set commands [list]
+    set endIndex [expr {[llength $subCommands] - 1}]
+    set allOptionNames [lsort [array names options]]
+    set ignoredOptionNames [list -- -stdin -stdout -stderr]
+
+    for {set index 0} {$index <= $endIndex} {incr index} {
+      set command [list ::exec]
+
+      foreach optionName $allOptionNames {
+        if {$optionName ni $ignoredOptionNames} then {
+          set optionValue $options($optionName)
+
+          if {$optionValue ne $sentinel} then {
+            lappend command $optionName $optionValue
+          } else {
+            lappend command $optionName
+          }
+        }
+      }
+
+      if {$index > 0 || [info exists options(-stdin)]} then {
+        lappend command -stdin localStandardInput($index)
+      }
+
+      lappend command -stdout standardOutput($index)
+      lappend command -stderr standardError($index)
+
+      set subCommand [lindex $subCommands $index]; # list?
+
+      if {[string is not list -strict $subCommand]} then {
+        error [appendArgs \
+            "sub-command is not proper list: " $subCommand]
+      }
+
+      eval lappend command -- $subCommand
+      lappend commands $command
+    }
+
+    return $commands
+  }
+
+  proc runExecCommandList {
+          optionsVarName commands {savedStandardOutputVarName ""}
+          {savedStandardErrorVarName ""} } {
+    array set options [downlevel [list array get $optionsVarName]]
+
+    if {[string length $savedStandardOutputVarName] > 0} then {
+      upvar 1 $savedStandardOutputVarName savedStandardOutput
+
+      if {[info exists savedStandardOutput] && \
+          ![array exists savedStandardOutput]} then {
+        error [appendArgs \
+            "cannot save standard outputs to scalar: " \
+            $savedStandardOutputVarName]
+      }
+    }
+
+    if {[string length $savedStandardErrorVarName] > 0} then {
+      upvar 1 $savedStandardErrorVarName savedStandardError
+
+      if {[info exists savedStandardError] && \
+          ![array exists savedStandardError]} then {
+        error [appendArgs \
+            "cannot save standard errors to scalar: " \
+            $savedStandardErrorVarName]
+      }
+    }
+
+    set endIndex [expr {[llength $commands] - 1}]
+
+    for {set index 0} {$index <= $endIndex} {incr index} {
+      if {$index > 0 || [info exists options(-stdin)]} then {
+        set localStandardInput($index) ""
+
+        if {$index > 0} then {
+          set previousIndex [expr {$index - 1}]
+
+          if {[info exists standardOutput($previousIndex)]} then {
+            append localStandardInput($index) \
+                $standardOutput($previousIndex)
+          }
+
+          if {[hasRuntimeOption execPipesWithStandardError]} then {
+            if {[info exists standardError($previousIndex)]} then {
+              append localStandardInput($index) \
+                  $standardError($previousIndex)
+            }
+          }
+        } else {
+          if {[info exists options(-stdin)] && \
+              [uplevel 1 [list info exists $options(-stdin)]]} then {
+            append localStandardInput($index) \
+                [uplevel 1 [list set $options(-stdin)]]
+          }
+        }
+      }
+
+      if {[hasRuntimeOption traceRunExecCommandList]} then {
+        catch {
+          tclLog [appendArgs \
+              command( $index "): " [lindex $commands $index]]
+        }
+      }
+
+      set result($index) [eval [lindex $commands $index]]; # throw
+
+      if {[info exists standardOutput($index)]} then {
+        if {$index == $endIndex && [info exists options(-stdout)]} then {
+          uplevel 1 [list set $options(-stdout) $standardOutput($index)]
+        }
+
+        if {[string length $savedStandardOutputVarName] > 0} then {
+          set savedStandardOutput($index) $standardOutput($index)
+        }
+      }
+
+      if {[info exists standardError($index)]} then {
+        if {$index == $endIndex && [info exists options(-stderr)]} then {
+          uplevel 1 [list set $options(-stderr) $standardError($index)]
+        }
+
+        if {[string length $savedStandardErrorVarName] > 0} then {
+          set savedStandardError($index) $standardError($index)
+        }
+      }
+    }
+
+    if {[info exists result($endIndex)]} then {
+      return $result($endIndex)
+    } else {
+      error [appendArgs "missing end result #" $endIndex]
+    }
+  }
+
+  proc execWithPipes { args } {
+    set wrongNumArgs [string trim {
+      wrong # args: should be "execWithPipes ?options? arg ?arg ...?"
+    }]
+
+    if {[llength $args] == 0} then {
+      error $wrongNumArgs
+    }
+
+    set interpreter [object invoke -alias Interpreter GetActive]
+
+    set execOptions [object invoke \
+        -alias -flags +NonPublic Eagle._Components.Private.ObjectOps \
+        GetExecOptions]; # get supported options for [exec]
+
+    set captureOptions [$execOptions -alias Filter Category01 true false]
+
+    set arguments [eval object create -alias ArgumentList $args]
+    $arguments Insert 0 [lindex [info level [info level]] 0]
+
+    set argumentIndex [set invalidIndex \
+        [object invoke Eagle._Constants.Index Invalid]]
+
+    set error null
+
+    if {[$interpreter GetOptions $execOptions $arguments 0 1 \
+        $invalidIndex true argumentIndex error] ne "Ok"} then {
+      error [getStringFromObjectHandle $error]
+    }
+
+    if {$argumentIndex == $invalidIndex} then {
+      error $wrongNumArgs
+    }
+
+    set sentinel [format %lx [expr {random()}]]; # transient
+
+    object foreach -alias pair $execOptions {
+      set option [$pair -alias Value]
+
+      if {![isNonNullObjectHandle $option]} then {
+        continue; # TODO: Error?
+      }
+
+      set name [$option Name]
+
+      if {[$option HasFlags MustHaveValue true]} then {
+        set value null
+
+        if {[[$option -create -alias -objectflags +NoDispose \
+            IsPresent $execOptions value] ToString]} then {
+          if {[$option HasFlags MustBeCallback true] || \
+              [$option HasFlags MustBeSecureString true]} then {
+            set options($name) $value; # opaque object handle (?)
+          } else {
+            set options($name) [$value ToString]
+          }
+        }
+      } elseif {[$option IsPresent $execOptions]} then {
+        set options($name) $sentinel
+      }
+    }
+
+    incr argumentIndex -1
+
+    set subCommands [eval createExecSubCommandList options \
+        [lrange $args $argumentIndex end]]
+
+    set commands [createExecCommandList \
+        $sentinel options $captureOptions $subCommands]
+
+    if {[hasRuntimeOption saveExecWithPipes]} then {
+      set savedStandardOutputVarName savedExecWithPipesOutput
+      set savedStandardErrorVarName savedExecWithPipesError
+    } else {
+      set savedStandardOutputVarName ""
+      set savedStandardErrorVarName ""
+    }
+
+    return [uplevel 1 [list runExecCommandList options $commands \
+        $savedStandardOutputVarName $savedStandardErrorVarName]]
+  }
+
+  #
+  # NOTE: Provide the Eagle "pipes" package to the interpreter.
+  #
+  package provide Eagle.Execute.Pipes \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+
