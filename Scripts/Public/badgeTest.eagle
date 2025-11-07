@@ -1,0 +1,199 @@
+###############################################################################
+#
+# badgeTest.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Badge Plugin Demo Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Setup the list of test suites to run from this file.
+#
+if {[string is true -strict \
+    [getDictionaryValue $::argv -runAllBadgeTests]]} then {
+  if {[lsearch -exact -- $::argv -badgeTests] == -1} then {
+    if {[isDotNetCore]} then {
+      lappend ::argv -badgeTests [list \
+          Harpy Badge Zeus Demo Version]
+    } else {
+      lappend ::argv -badgeTests [list \
+          Harpy Badge Kapok Zeus Demo HotKey AlphaCipher KeyPair \
+          Featherlight Version]
+    }
+  }
+}
+
+#
+# NOTE: Must do this first because all other plugins require the license
+#       certificate checking.  Also, this installs the secure script, file,
+#       and stream policies.
+#
+host result Ok [appendArgs "Licensing.Enterprise: " \
+    [package require Licensing.Enterprise] \n\n]
+
+#
+# NOTE: Configure the secure script, file, stream, and other policies.  Also
+#       note that setting the "VerifyFile" for the stream policy will most
+#       likely cause it to fail all the time.
+#
+host result Ok [appendArgs "New certificate policy: " \
+    [certificate policy -local true -enabled true] \n\n]
+
+#
+# NOTE: Next, bootstrap the trusted signed file/script policies by merging
+#       the key pair(s) used to sign the script library and test suites.
+#
+host result Ok [appendArgs "Key ring bootstrap: " \
+    [keyring bootstrap] \n\n]
+
+#
+# NOTE: Load the plugin that provides the script certificates for the files
+#       in the standard Eagle script library, including the testing package.
+#
+host result Ok [appendArgs "Badge.Enterprise: " \
+    [package require Badge.Enterprise] \n\n]
+
+#
+# NOTE: Run the Harpy test suite with full security enabled, this should
+#       pass.
+#
+if {"Harpy" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Commercial Enterprise Harpy Tests all.eagle]
+} else {
+  host result Break "Harpy tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the Badge test suite with full security enabled, this should
+#       pass.
+#
+if {"Badge" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Commercial Enterprise Badge Tests all.eagle]
+} else {
+  host result Break "Badge tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the Kapok test suite with full security enabled, this should
+#       pass.  Generally, it's much better to use the "#kapoktest" command
+#       instead of evaluating the test file directly.
+#
+if {"Kapok" in [getDictionaryValue $::argv -badgeTests]} then {
+  if {[string is true -strict \
+      [getDictionaryValue $::argv -runRawKapokTest]]} then {
+    source [file join [info base] \
+        Plugins Commercial Enterprise Kapok Tests all.eagle]
+  } else {
+    #
+    # NOTE: This also does proper setup to run it.
+    #
+    if {[string is true -strict \
+        [getDictionaryValue $::argv -iis]]} then {
+      \#kapoktest true
+    } else {
+      \#kapoktest false
+    }
+  }
+} else {
+  host result Break "Kapok tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the Zeus test suite with full security enabled, this should
+#       pass.
+#
+if {"Zeus" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Commercial Enterprise Zeus Tests all.eagle]
+} else {
+  host result Break "Zeus tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the Demo test suite with full security enabled, this should
+#       pass.
+#
+if {"Demo" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Commercial Enterprise Demo Tests all.eagle]
+} else {
+  host result Break "Demo tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the HotKey test suite with full security enabled, this should
+#       pass.
+#
+if {"HotKey" in [getDictionaryValue $::argv -badgeTests]} then {
+  if {[info exists ::no(timeIntensive)] || [string is true -strict \
+      [getDictionaryValue $::argv -runTimeIntensiveTests]]} then {
+    set noTimeIntensiveSet false
+  } else {
+    set noTimeIntensiveSet true
+    set ::no(timeIntensive) 1; # HACK: Skip hot-key selection form test.
+  }
+
+  try {
+    source [file join [info base] \
+        Plugins Commercial Enterprise HotKey Tests all.eagle]
+  } finally {
+    if {$noTimeIntensiveSet} then {
+      unset -nocomplain ::no(timeIntensive)
+    }
+  }
+} else {
+  host result Break "HotKey tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the AlphaCipher test suite with full security enabled, this
+#       should pass.
+#
+if {"AlphaCipher" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Proprietary Vadium AlphaCipher Tests all.eagle]
+} else {
+  host result Break "AlphaCipher tests skipped.\n\n"
+}
+
+#
+# NOTE: Run the KeyPair test suite with full security enabled, this should
+#       pass.
+#
+if {"KeyPair" in [getDictionaryValue $::argv -badgeTests]} then {
+  source [file join [info base] \
+      Plugins Proprietary Vadium KeyPair Tests all.eagle]
+} else {
+  host result Break "KeyPair tests skipped.\n\n"
+}
+
+#
+# NOTE: Launch Featherlight with full security enabled, this should work.
+#
+if {"Featherlight" in [getDictionaryValue $::argv -badgeTests]} then {
+  package require Featherlight.Environment
+} else {
+  host result Break "Featherlight tests skipped.\n\n"
+}
+
+#
+# NOTE: Display the version information for all loaded plugins, including
+#       their license certificates.
+#
+if {"Version" in [getDictionaryValue $::argv -badgeTests]} then {
+  debug icommand #version
+} else {
+  host result Break "Version check skipped.\n\n"
+}
+
+host result Ok "Done with all test suites.\n\n"

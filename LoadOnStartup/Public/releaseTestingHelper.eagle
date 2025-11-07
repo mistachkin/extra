@@ -1,0 +1,168 @@
+###############################################################################
+#
+# releaseTestingHelper.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Release Testing Helper Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval ::Eagle {
+  if {[llength [info commands appendArgs]] == 0} then {
+    #
+    # NOTE: This procedure was stolen from the "auxiliary.eagle" core script
+    #       library file.
+    #
+    proc appendArgs { args } {
+      # <help>
+      # This procedure appends a bunch of arguments and returns the final
+      # resulting string.  It is never (?) strictly needed; however, it
+      # can be used to make things look cleaner.
+      # </help>
+
+      set result ""; eval append result $args
+    }
+  }
+
+  proc logForReleaseTesting { message } {
+    # <help>
+    # This procedure attempts to emit a message to whomever is listening.
+    # It is intended to be used only from within this script file.  It is
+    # a bit specialized since it cannot use [tputs], [tqputs] procedures,
+    # et al, here because those will not be defined until much later, in
+    # the core script library initialization process.
+    # </help>
+
+    catch {debug output $message}
+    catch {puts stdout $message}
+    catch {tclLog $message}
+
+    host result Ok [appendArgs $message \n]
+
+    return ""
+  }
+
+  proc setupForReleaseTesting {
+          {testNotFile ""} {testFile ""} {testType ""} {testAll false} } {
+    # <help>
+    # This procedure may attempt to modify the command line argument list
+    # based on several criteria related to official release testing, i.e.
+    # to help streamline the process.
+    # </help>
+
+    if {[catch {
+      package require Eagle.Test
+    } error(1)] && [catch {
+      uplevel 1 [list source [file join \
+          [info base] lib Eagle1.0 init.eagle]]
+
+      package withdraw Eagle.Library
+      package forget Eagle.Library
+
+      uplevel 1 [list source [file join \
+          [info base] lib Eagle1.0 test.eagle]]
+
+      package withdraw Eagle.Test
+      package forget Eagle.Test
+    } error(2)]} then {
+      logForReleaseTesting [appendArgs \
+          ">>>> core script library package(s) missing: " \
+          [join [list $error(1) $error(2)] \n\n]]
+
+      exit -force -- Failure
+    }
+
+    logForReleaseTesting [appendArgs \
+        ">>>> starting of official release testing, argv now: " \
+        [maybeGetArgv]]
+
+    if {[string length $testNotFile] > 0} then {
+      addToArgv -notFile $testNotFile
+
+      logForReleaseTesting [appendArgs \
+          ">>>> caller had test file to exclude, argv now: " \
+          [maybeGetArgv]]
+    }
+
+    if {[string length $testFile] > 0} then {
+      addToArgv -file $testFile
+
+      logForReleaseTesting [appendArgs \
+          ">>>> caller had test file to include, argv now: " \
+          [maybeGetArgv]]
+    }
+
+    #
+    # HACK: For all non-default builds, skip running performance
+    #       tests (i.e. the "benchmark.eagle" and "perf*.eagle"
+    #       files) either because basic performance has already
+    #       been verified to be roughly the same (or better) than
+    #       the default build -OR- because we lack the necessary
+    #       fine-grained timing functionality, which requires
+    #       (access to) native code and the Win32 API.
+    #
+    if {[string length $testType] > 0 && \
+        ![string is true -strict $testAll]} then {
+      addToArgv -notFile benchmark.eagle
+      addToArgv -notFile perf*.eagle
+
+      logForReleaseTesting [appendArgs \
+          ">>>> added performance test files to exclude, argv now: " \
+          [maybeGetArgv]]
+    }
+
+    #
+    #  HACK: For all official stable release builds, we never want
+    #        to run these extremely time consuming and/or processor
+    #        intensive tests (i.e. "lpermute-1.3.*") because their
+    #        basic correctness should have already been verified.
+    #
+    #  HACK: The above is correct EXCEPT that we really do want to
+    #        run these tests for the NetFx40 build configuration.
+    #
+    if {[info exists ::env(OFFICIAL)] && \
+        [info exists ::env(STABLE)]} then {
+      #
+      # TODO: Perhaps in the future expand this to NetFx20 build
+      #       configuration as well?
+      #
+      if {![info exists ::eagle_platform(text)] || \
+          $::eagle_platform(text) ne "NetFx40"} then {
+        addToArgv -skip interp-1.50000; # NOTE: Can take 2 HOURS.
+        addToArgv -skip lpermute-1.3.*; # NOTE: Can take 45 MINUTES.
+
+        logForReleaseTesting [appendArgs \
+            ">>>> added time consuming test names to skip, argv now: " \
+            [maybeGetArgv]]
+      }
+    }
+
+    #
+    # NOTE: Always show final global argument list before exiting.
+    #
+    logForReleaseTesting [appendArgs \
+        ">>>> ready for official release testing, argv now: " \
+        [maybeGetArgv]]
+
+    return ""
+  }
+
+  #
+  # NOTE: This script file requires the main startup helpers script
+  #       file to be loaded as well.
+  #
+  uplevel #0 [list \
+      source [file join [file dirname [info script]] helpers.eagle]]
+}
+

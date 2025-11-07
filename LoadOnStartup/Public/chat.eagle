@@ -1,0 +1,474 @@
+###############################################################################
+#
+# chat.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Fossil Chat Polling Package
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Eagle {
+  #
+  # NOTE: This procedure makes sure that all packages needed by this module
+  #       are loaded.  This procedure may raise script errors.
+  #
+  proc setupForChat { force } {
+    #
+    # NOTE: Which specific server host, if any, is being used for chatting
+    #       features?
+    #
+    variable serverHost; # DEFAULT: 1
+
+    if {$force || ![info exists serverHost]} then {
+      set serverHost 1
+    }
+
+    #
+    # NOTE: What are the list of filter rules for chat alerts?  Each of the
+    #       elements in the list is a [string match] pattern to check xfrom
+    #       values against.  If the first character of a filter rule is "!",
+    #       that means it is an exclusion instead of an inclusion.
+    #
+    variable chatFilter; # DEFAULT: [list]
+
+    if {$force || ![info exists chatFilter]} then {
+      set chatFilter [list]
+    }
+
+    #
+    # NOTE: This script will require access to the Windows clipboard.  Make
+    #       sure that we can load WinForms now.  This may fail on Mono (and
+    #       other imlementations) that do not really support WinForms.
+    #
+    set assembly [object load System.Windows.Forms]; # DISPOSAL
+
+    #
+    # NOTE: If necessary, download and load the "Package Client Toolset"
+    #       now.  This is required in order to programmatically login to
+    #       a Fossil repository.
+    #
+    if {[catch {package present Eagle.Package.Repository}]} then {
+      loadPackageClientToolset [downloadAndExtractPackageClientToolset]
+    }
+
+    #
+    # NOTE: This is fairly obvious; however, something that is not obvious
+    #       is that the HotKey plugin provides quite a few "support"-style
+    #       sub-commands that are useful for dealing with some interactive
+    #       users, e.g. [hotkey secret], etc.
+    #
+    if {[catch {package present HotKey.Enterprise}]} then {
+      set ::HotKey.Enterprise_NoComplaintForm true; # EXEMPT
+      package require HotKey.Enterprise
+    }
+
+    #
+    # NOTE: This is less obvious; The secrets package provides the routines
+    #       to search for secret data, optionally prompting the interactive
+    #       user for a file name pattern to match in the secrets repository
+    #       checkout directory.
+    #
+    if {[catch {package present Eagle.Secrets}]} then {
+      package require Eagle.Secrets
+    }
+
+    #
+    # NOTE: Again, obvious.  The downloader package is used to be able to
+    #       properly login to a remote Fossil repository, perform requests,
+    #       and then logout.
+    #
+    if {[catch {package present Eagle.Package.Downloader}]} then {
+      package require Eagle.Package.Downloader
+
+      namespace eval ::PackageDownloader {}
+
+      set ::PackageDownloader::baseUri \
+          [addHostToUriForChatPoll [info engine AuxiliaryBaseUri]]
+
+      if {[info exists ::env(DEBUG_URN)]} then {
+        set ::PackageDownloader::loginUrn urn_login_test
+        set ::PackageDownloader::logoutUrn urn_logout_test
+      } else {
+        set ::PackageDownloader::loginUrn urn_login
+        set ::PackageDownloader::logoutUrn urn_logout
+      }
+    }
+  }
+
+  #
+  # NOTE: This procedure returns a DateTime format suitable for use with both
+  #       Fossil response processing and SMS messages.
+  #
+  proc getDateTimeFormatForChat { {display false} } {
+    if {$display} then {
+      return "yyyy-MM-dd @ HH:mm:ssZ"
+    } else {
+      return yyyy-MM-ddTHH:mm:ssZ
+    }
+  }
+
+  #
+  # NOTE: This procedure may mutate a base URI in order to target a specific
+  #       host with the target domain.
+  #
+  proc addHostToUriForChatPoll { baseUri } {
+    variable serverHost
+
+    if {[info exists serverHost] && [string length $serverHost] > 0 && \
+        [[set ok [object invoke -create -alias Uri TryCreate $baseUri \
+        Absolute uri]] ToString] && [isNonNullObjectHandle $uri]} then {
+      return [string map \
+          [list [$uri Host] [appendArgs $serverHost . [$uri Host]]] \
+          [$uri ToString]]
+    }
+
+    return $baseUri
+  }
+
+  #
+  # NOTE: This procedure returns an absolute URI that can be used to poll for
+  #       new chat messages -OR- notify somebody of new chat messages, within
+  #       the configured Fossil repository.
+  #
+  proc getUriForChatPoll { alert } {
+    if {[info exists ::PackageDownloader::baseUri]} then {
+      set baseUri $::PackageDownloader::baseUri
+    } else {
+      set baseUri [info engine AuxiliaryBaseUri]
+    }
+
+    return [appendArgs \
+        $baseUri [expr {$alert ? "/chat_alert" : "/chat-poll"}]]
+  }
+
+  #
+  # NOTE: This procedure logs an error conditions that occur during polling
+  #       for new chat messages.
+  #
+  proc logErrorForChatPoll { message } {
+    set level [lindex [info level [info level]] 0]
+    set message [appendArgs $level ": " $message]
+
+    catch {tclLog $message}
+    catch {hotkey log $message}
+    catch {logRemoteMessage $message}
+  }
+
+  #
+  # NOTE: This procedure attempts to copy a specific piece of secret data to
+  #       the clipboard.
+  #
+  proc copySecretForChatPoll { envVarName filePattern } {
+    return [eval [::Secrets::getSecretSearchCommand \
+        [getEnvironmentVariable $envVarName] true $filePattern]]
+  }
+
+  #
+  # NOTE: This procedure attempts to match the specified message originator
+  #       against the set of (pre-?)defined chat filter rules.  If there are
+  #       no chat filter rules defined, the result will be true; otherwise,
+  #       the result will be true if all chat filter rules are matched (or
+  #       NOT matched, if they are negative rules).
+  #
+  proc maybeFilterForChat { xfrom } {
+    variable chatFilter
+
+    if {[info exists chatFilter]} then {
+      set match true
+
+      foreach rule $chatFilter {
+        set trimRule [string trim $rule]
+
+        if {[string length $trimRule] > 0 && \
+            [string index $trimRule 0] eq "!"} then {
+          set trimRule [string range $trimRule 1 end]
+          set wantMatch false
+        } else {
+          set wantMatch true
+        }
+
+        if {[string match \
+            $trimRule $xfrom] != $wantMatch} then {
+          set match false; break
+        }
+      }
+
+      return $match
+    } else {
+      return true
+    }
+  }
+
+  #
+  # NOTE: This procedure queries the target Fossil repository in order to see
+  #       if there are new chat messages.  Non-zero will be returned only upon
+  #       a successful query -AND- when there are actually new chat messages.
+  #
+  proc pollForChat { mtimeVarName xfromVarName } {
+    if {[catch {
+      ::PackageDownloader::getPackageFile [getUriForChatPoll false]
+    } data] == 0} then {
+      set mtimePattern \
+          {\"mtime\"\s*:\s*\"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\"}
+
+      set xfromPattern {\"xfrom\"\s*:\s*\"([^\"]*)\"}
+      set xmsgPattern {\"xmsg\"\s*:\s*\"([^\"]*)\"}
+
+      #######################################################################
+
+      if {[string length $mtimeVarName] > 0} then {
+        upvar 1 $mtimeVarName mtime
+      }
+
+      if {[string length $xfromVarName] > 0} then {
+        upvar 1 $xfromVarName xfrom
+      }
+
+      #######################################################################
+
+      set data [string map [list \r\n \n] $data]
+      set lines [split $data \n]
+      unset -nocomplain localMaximumMtime
+
+      foreach line $lines {
+        if {![regexp -skip 1 -- $xmsgPattern $line xmsg]} then {
+          continue
+        }
+
+        if {[string length $xmsg] == 0} then {; # DELETED?
+          continue
+        }
+
+        if {![regexp -skip 1 -- $xfromPattern $line xfrom]} then {
+          continue
+        }
+
+        if {$xfrom eq $::tcl_platform(user)} then {
+          continue
+        }
+
+        if {![regexp -skip 1 -- $mtimePattern $line mtime]} then {
+          continue
+        }
+
+        set mtime [clock scan $mtime -format [getDateTimeFormatForChat]]
+
+        if {![info exists localMaximumMtime]} then {
+          set localMaximumMtime $mtime; continue; # SKIP FIRST TIME
+        }
+
+        if {$localMaximumMtime != 0 && \
+            $mtime <= $localMaximumMtime} then {
+          continue
+        }
+
+        if {![maybeFilterForChat $xfrom]} then {
+          continue
+        }
+
+        set localMaximumMtime $mtime
+      }
+
+      #######################################################################
+
+      if {[info exists localMaximumMtime]} then {
+        variable maximumMtime
+
+        if {![info exists maximumMtime]} then {
+          set maximumMtime $localMaximumMtime
+          return false
+        }
+
+        if {$localMaximumMtime <= $maximumMtime} then {
+          return false
+        }
+
+        set maximumMtime $localMaximumMtime
+        return true
+      }
+    } else {
+      logErrorForChatPoll [appendArgs "could not poll chat: " $data]
+    }
+  }
+
+  #
+  # NOTE: This procedure attempts to notify one or more remote users about
+  #       (possibly) new chat messages.
+  #
+  proc notifyUriForChat { mtime xfrom to } {
+    if {$xfrom ne $::tcl_platform(user)} then {
+      set message [appendArgs \
+          "New chat message from " $xfrom " at " [clock \
+          format $mtime -format [getDateTimeFormatForChat true]] .]
+
+      try {
+        set uri [getUriForChatPoll true]
+
+        foreach name [list to message] value [list $to $message] {
+          if {[string length $name] == 0 || \
+              [string length $value] == 0} then {
+            continue
+          }
+
+          if {[string first ? $uri] != -1} then {
+            append uri &
+          } else {
+            append uri ?
+          }
+
+          append uri \
+              [uri escape data $name] = [uri escape data $value]
+        }
+
+        return [uri download -timeouttype network -inline $uri]
+      } finally {
+        catch {tclLog $message}
+        catch {hotkey log $message}
+      }
+    } else {
+      return false
+    }
+  }
+
+  #
+  # NOTE: This procedure attempts to notify one remote user about (possibly)
+  #       new chat messages using the Twilio SMS API.
+  #
+  proc notifySmsForChat { mtime xfrom to } {
+    if {$xfrom ne $::tcl_platform(user)} then {
+      set message [appendArgs \
+          "New chat message from " $xfrom " at " [clock \
+          format $mtime -format [getDateTimeFormatForChat true]] .]
+
+      try {
+        package require Eagle.Sms
+
+        if {![info exists ::env(TwilioAccountSid)]} then {
+          error "missing Twilio account string identifier"
+        }
+
+        if {![info exists ::env(TwilioAuthToken)]} then {
+          error "missing Twilio authorization token"
+        }
+
+        if {![info exists ::env(TwilioPhoneNumber)]} then {
+          error "missing Twilio phone number"
+        }
+
+        return [sendViaShortMessageService \
+            $::env(TwilioAccountSid) $::env(TwilioAuthToken) \
+            $::env(TwilioPhoneNumber) $to $message]
+      } finally {
+        catch {tclLog $message}
+        catch {hotkey log $message}
+      }
+    } else {
+      return false
+    }
+  }
+
+  #
+  # NOTE: This procedure is designed to loop forever, pausing each time, and
+  #       then poll the remote Fossil repository for new chat messages.  When
+  #       a new chat message is seen, a notification will be fired, probably
+  #       via SMS.
+  #
+  proc loopThePoolForChat {
+          {envVarName KEYS_DIR} {filePattern ""} {milliseconds 10000} \
+          {notifyCommand ::notifyUriForChat} {to ""} } {
+    if {![info exists ::env(UrnPassword)]} then {
+      try {
+        if {[copySecretForChatPoll $envVarName $filePattern]} then {
+          set ::env(UrnPassword) \
+              [object invoke System.Windows.Forms.Clipboard GetText]
+        }
+      } finally {
+        ::Secrets::removeSecretFromClipboard
+      }
+    }
+
+    set result -1
+
+    if {[info exists ::tcl_platform(user)] && \
+        [info exists ::env(UrnPassword)]} then {
+      try {
+        if {[catch {
+          ::PackageDownloader::resetCookieAndLogin \
+              $::tcl_platform(user) $::env(UrnPassword)
+        } error] == 0} then {
+          while {![info exists ::loopThePoolForChatDone]} {
+            set mtime 0; set xfrom ""
+
+            catch {
+              if {[pollForChat mtime xfrom]} then {
+                if {[string length $notifyCommand] > 0} then {
+                  set command [list $notifyCommand]
+                  lappend command $mtime $xfrom $to
+
+                  if {[catch $command error]} then {
+                    logErrorForChatPoll [appendArgs \
+                        "could not notify for chat: " $error]
+                  }
+                }
+
+                if {$result == -1} then {
+                  set result 1
+                } else {
+                  incr result
+                }
+              }
+            }
+
+            if {$mtime > 0} then {
+              set message [appendArgs \
+                  "PING! " [clock format $mtime -format \
+                  [getDateTimeFormatForChat]] " from " \
+                  $xfrom]
+            } else {
+              set message PING!
+            }
+
+            catch {tclLog $message}
+            catch {hotkey log $message}
+
+            after $milliseconds [list set ::chatPing $mtime]
+            vwait -force -resetcancel -- ::chatPing
+          }
+        } else {
+          logErrorForChatPoll [appendArgs \
+              "could not login to repository: " $error]
+        }
+      } finally {
+        if {[catch {
+          ::PackageDownloader::logoutAndResetCookie
+        } error]} then {
+          logErrorForChatPoll [appendArgs \
+              "could not logout of repository: " $error]
+        }
+      }
+    } else {
+      logErrorForChatPoll "missing user or password"
+    }
+
+    return $result
+  }
+
+  #
+  # NOTE: Provide the Eagle "chat" package to the interpreter.
+  #
+  package provide Eagle.Chat \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+

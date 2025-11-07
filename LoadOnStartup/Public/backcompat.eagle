@@ -1,0 +1,263 @@
+###############################################################################
+#
+# backcompat.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Compatibility Shims
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval :: {
+  proc checkStringBuilderCache { {patchLevel 1.0.8370.0} } {
+    if {[checkIsEagle] && \
+        ![checkEaglePatchLevel $patchLevel] &&
+        [llength [info commands #cacheon]] > 0} then {
+      uplevel 1 [list \#cacheon "" true true true]
+    }
+  }
+
+  proc checkIsWindows {} {
+    #
+    # NOTE: This is a pre-beta 29 compatibility shim for the
+    #       [isWindows] script library procedure.
+    #
+    if {[llength [info procs isWindows]] == 0} then {
+      proc isWindows {} {
+        return [expr {[info exists ::tcl_platform(platform)] && \
+            $::tcl_platform(platform) eq "windows"}]
+      }
+    }
+  }
+
+  proc checkEagleBeta28 { {patchLevel 1.0.5000.25377} } {
+    #
+    # NOTE: Is the running patch level of Eagle less than or equal to the
+    #       beta 28 release patch level?
+    #
+    if {[checkIsEagle] && [checkEaglePatchLevel $patchLevel]} then {
+      #
+      # HACK: Prevent the Eagle core test suite infrastructure from doing
+      #       things that require beta 29 (or later) binaries.  This section
+      #       should be removed when the Eagle beta 29 binaries are checked
+      #       into the System.Data.SQLite repository.
+      #
+      set ::no(getTclShellFileName) 1; # NOTE: Lack of [tcl versionrange].
+      set ::no(testSuiteFiles) 1; # NOTE: Lack of [hash -filename].
+
+      #
+      # HACK: Fake the [interp readylimit] sub-command for all pre-beta 29
+      #       versions.  This is done by "sub-classing" the entire [interp]
+      #       command and then checking if the "readylimit" sub-command is
+      #       being invoked.
+      #
+      if {[llength [info commands _interp]] == 0} then {
+        rename interp _interp
+
+        proc interp { args } {
+          if {[llength $args] >= 1 && \
+              [lindex $args 0] eq "readylimit"} then {
+            #
+            # NOTE: Prior to beta 29, the interpreter readiness is always
+            #       fully checked for every call.
+            #
+            return 0
+          }
+
+          return [uplevel 1 _interp $args]
+        }
+      }
+    }
+  }
+
+  proc checkEagleBeta36 { {patchLevel 1.0.5982.00000} } {
+    if {![info exists ::no(NoAutoRecord)] && \
+        ![info exists ::env(NoAutoRecord)] && \
+        [checkIsEagle] && ![checkEaglePatchLevel $patchLevel]} then {
+      if {![info exists ::no(ForceAutoRecord)] || \
+          [info exists ::env(ForceAutoRecord)]} then {
+        #
+        # NOTE: Enable recording of all interactively entered commands.
+        #
+        \#record 1
+      }
+    }
+  }
+
+  proc checkEagleBeta41 {} {
+    if {[checkIsEagle] && \
+        [lsearch -exact [info commands] isNonNullObjectHandle] == -1} then {
+      proc isNonNullObjectHandle { value } {
+        global null
+        return [expr {[isObjectHandle $value] && $value ne $null}]
+      }
+    }
+  }
+
+  proc checkEagleBeta42 {} {
+    if {[checkIsEagle] && \
+        [lsearch -exact [info commands] isDotNetCore] == -1} then {
+      proc isDotNetCore {} {
+        return [expr {[info exists ::eagle_platform(runtime)] && [string \
+            compare -nocase ".net core" $::eagle_platform(runtime)] == 0}]
+      }
+
+      proc doesCompileCSharpWork { {name ""} } {
+        return true
+      }
+    }
+  }
+
+  proc checkEagleBeta46 {} {
+    if {[checkIsEagle] && \
+        [lsearch -exact [info commands] getShellExecutableName] == -1} then {
+      proc getShellExecutableName {} {
+        if {[isEagle]} then {
+          if {[isMono] || [isDotNetCore]} then {
+            return [lindex [info assembly true] 1]
+          } else {
+            return [info nameofexecutable]
+          }
+        } else {
+          return [info nameofexecutable]
+        }
+      }
+    }
+  }
+
+  proc checkEagleBeta47 {} {
+    if {[checkIsEagle] && \
+        [lsearch -exact [info commands] vwaitLocked] == -1} then {
+      proc vwaitLocked { varName isArray script } {
+        uplevel 1 $script
+      }
+    }
+  }
+
+  proc checkEagleBeta49 {} {
+    #
+    # NOTE: This is a pre-beta 49 compatibility shim for the
+    #       [checkForUnicodeCategory] test library procedure.
+    #
+    if {[checkIsEagle] && \
+        [llength [info procs checkForUnicodeCategory]] == 0} then {
+      proc checkForUnicodeCategory { channel character wantCode } {}
+    }
+  }
+
+  proc checkEagleBeta51 { {timeout 20000} {patchLevel 1.0.8251.52012} } {
+    if {[checkIsEagle] && ![checkEaglePatchLevel $patchLevel]} then {
+      set error null
+
+      # object invoke Interpreter.GetActive GetTimeout Network error
+
+      object invoke Interpreter.GetActive SetOrUnsetTimeout \
+          Network $timeout error
+
+      #
+      # HACK: This was stolen from the "testPrologue.eagle" file.
+      #
+      set ::test_timeout $timeout;     # NOTE: Make timeouts more obvious?
+    }
+  }
+
+  proc checkEagleBeta53 {} {
+    if {[checkIsEagle]} then {
+      #
+      # NOTE: This is a pre-beta 53 compatibility shim for the
+      #       [checkForOfflineMode] test library procedure.
+      #
+      if {[llength [info procs checkForOfflineMode]] == 0} then {
+        proc checkForOfflineMode { channel } {}
+      }
+
+      #
+      # NOTE: This is a pre-beta 53 compatibility shim for the
+      #       [reportTestDuplicateNames] test library procedure.
+      #
+      if {[llength [info procs reportTestDuplicateNames]] == 0} then {
+        proc reportTestDuplicateNames { channel } {}
+      }
+
+      #
+      # NOTE: This is a pre-beta 53 compatibility shim for the
+      #       [reportTestResultCounts] test library procedure.
+      #
+      if {[llength [info procs reportTestResultCounts]] == 0} then {
+        proc reportTestResultCounts { channel {varName ""} } {
+          if {[string length $varName] > 0} then {
+            upvar 1 $varName percent
+          }
+
+          set percent [getPassedPercentage]
+        }
+      }
+    }
+  }
+
+  proc checkEagleBeta55 {} {
+    if {![info exists ::no(NoPromptCount)] && \
+        ![info exists ::env(NoPromptCount)] && \
+        [checkIsEagle]} then {
+      if {"Count" in [object invoke Enum GetNames PromptFlags]} then {
+        object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+            Interpreter.GetActive promptFlags +Count
+      }
+    }
+  }
+
+  proc checkEagleBeta56 {} {
+    if {[checkIsEagle]} then {
+      if {[llength [info procs checkForTip237]] == 0} then {
+        proc checkForTip237 { channel } {}
+      }
+
+      if {[string length [package ifneeded Eagle.Test 1.0]] > 0 && \
+          [catch {package require Eagle.Test}] == 0} then {
+        if {![info exists ::no(NoTclPrompt1)] && \
+            ![info exists ::env(NoTclPrompt1)] && \
+            [llength [info commands eagle_setupPromptScript]] > 0} then {
+            set ::env(NoTclPrompt1Date) 1; # HACK: Too noisy?
+            eagle_setupPromptScript true
+        }
+
+        if {![info exists ::no(NoShellUnknown)] && \
+            ![info exists ::env(NoShellUnknown)] && \
+            [llength [info commands eagle_enableShellUnknown]] > 0} then {
+          # addRuntimeOption shellUnknown
+          # addRuntimeOption shellUnknown_ForceCommandLine
+          # addRuntimeOption shellUnknown_ForceDequote
+          # addRuntimeOption shellUnknown_ForceQuoteAll
+          # addRuntimeOption shellUnknown_EmitTrace
+          # addRuntimeOption shellUnknown_ForceCommandProcessor
+          # addRuntimeOption shellUnknown_NoCommandProcessor
+          # addRuntimeOption shellUnknown_NoShell
+          # addRuntimeOption shellUnknown_ForceShell
+          # addRuntimeOption shellUnknown_NoDashC
+          # addRuntimeOption shellUnknown_DashC
+          # addRuntimeOption shellUnknown_ForceSlashC
+          # addRuntimeOption shellUnknown_ForceDashCommand
+          # addRuntimeOption shellUnknown_ForceSingleQuote
+          # addRuntimeOption shellUnknown_NoSingleQuote
+          # addRuntimeOption shellUnknown_NoJoinSubResult
+          # addRuntimeOption shellUnknown_WhatIf
+          # addRuntimeOption shellUnknown_Verbose
+          # addRuntimeOption shellUnknown_ErrorFallback
+          # addRuntimeOption shellUnknown_OkFallback
+          eagle_enableShellUnknown true
+        }
+      }
+    }
+  }
+}
+

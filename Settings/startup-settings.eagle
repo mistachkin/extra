@@ -1,0 +1,50 @@
+###############################################################################
+#
+# startup-settings.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Tcl/Tk & Eagle Shell Startup Settings Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+apply [list [list script] {
+  set ::no(keepAliveThreadStart) 1; # for RemoteDebugger...
+  set ::no(runUpdateAndExit) 1; # annoying prompt when debugging...
+
+  #############################################################################
+
+  #
+  # NOTE: Skip adding (historic) commands to the "cmds*.eagle" text
+  #       file(s), possibly adding them to the database file instead.
+  #
+  set ::no(NoAddCommandToTextFile) 1
+
+  #############################################################################
+
+  #
+  # NOTE: Limit the maximum length of added (and returned) historical
+  #       commands to something reasonable.
+  #
+  # set ::eagle_debugger(MaximumLengthForAdd) 0
+  # set ::eagle_debugger(MaximumLengthForSearch) 0
+  set ::eagle_debugger(MaximumLengthForAdd) 300
+  set ::eagle_debugger(MaximumLengthForSearch) 300
+
+  #############################################################################
+
+  # set ::eagle_debugger(saveUniqueCmdsFile) 1; # [info exists]
+  set ::eagle_debugger(autoSaveCmdsFile) 1
+  set ::eagle_debugger(autoDiscardCmdsFile) 0
+  set ::eagle_debugger(autoCancelCmdsFile) 0
+
+  #############################################################################
+
+  set ::eagle_debugger(startup) [clock seconds]; # INDICATOR ONLY
+}] [info script]

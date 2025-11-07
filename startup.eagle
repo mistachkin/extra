@@ -1,0 +1,87 @@
+###############################################################################
+#
+# startup.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Startup Script (Synchronous)
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script will be evaluated by all created interpreters, in Eagle
+#       beta 46 and later, even if the interactive loop will not be entered.
+#
+if {![interp issafe] && ![interp issdk]} then {
+  apply [list [list] {
+    ###########################################################################
+    #
+    # NOTE: Load Tcl startup script file verbatim, in the global context.
+    #
+    if {![info exists ::no(NoStartupRunCommands)] && \
+        ![info exists ::env(NoStartupRunCommands)]} then {
+      uplevel #0 [list \
+          source [file join [file dirname [info script]] tclshrc.tcl]]
+    }
+
+    ###########################################################################
+    #
+    # HACK: Next, load Eagle Enterprise Edition licensing package script,
+    #       in the global context.
+    #
+    if {![info exists ::no(NoLicensingPackage)] && \
+        ![info exists ::env(NoLicensingPackage)]} then {
+      set ::no(NoLicensingPackageUnknownError) 1
+
+      set fileName [file join [file dirname \
+          [info script]] LoadOnStartup Private licensing.eagle]
+
+      if {[file exists $fileName]} then {
+        uplevel #0 [list source $fileName]
+      }
+    }
+
+    ###########################################################################
+    #
+    # HACK: The Eagle Enterprise Edition licensing hook package (i.e. the
+    #       script file "licensing.eagle") is always loaded (above) for
+    #       purposes of integration testing purposes; however, it should
+    #       only be enabled for interactive sessions.
+    #
+    if {![info exists ::no(NoLicensing)] && \
+        ![info exists ::env(NoLicensing)]} then {
+      #
+      # NOTE: Attempt to grab the opaque object handle for the current
+      #       interpreter, which is required.  Also, check if dynamic
+      #       licensing [package unknown] handler actually available.
+      #
+      set interpreter [object invoke -alias Interpreter GetActive]
+
+      if {[isNonNullObjectHandle $interpreter] && [llength \
+          [info commands ::Licensing::installPackageUnknown]] > 0} then {
+        #
+        # NOTE: Install [package unknown] handler for dynamic licensing
+        #       via license certificate overrides (i.e. Harpy, et al).
+        #
+        ::Licensing::installPackageUnknown $interpreter
+
+        #
+        # HACK: Since this hook could (potentially) cause issues when
+        #       it is not anticipated, emit an appropriate diagnostic
+        #       message.
+        #
+        if {1} then {
+          host result Continue [appendArgs \
+              "Licensing \[package unknown\] hook setup for " \
+              [appendArgs "interpreter #" [$interpreter IdNoThrow]] .\n]
+        }
+      }
+    }
+  }]
+}

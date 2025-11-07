@@ -1,0 +1,194 @@
+###############################################################################
+#
+# checkUpdateZeusHook.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Zeus Plugin Update-Check Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Eagle {
+  #
+  # NOTE: This procedure make sure the encryption password and salt are
+  #       initialized or cleaned up.
+  #
+  proc setupEncryptionPasswordAndSalt { setup } {
+    global zeus
+
+    #
+    # TODO: Change these to somehow obtain real password and salt.  For
+    #       now, these hard-coded values are fine.  In fact, they match
+    #       those used to encrypt the test update scripts.
+    #
+    if {$setup} then {
+      set zeus(password) password
+      set zeus(salt) test1234
+    } else {
+      foreach varName [list salt password] {
+        unset -nocomplain -zerostring -purge -- zeus($varName)
+      }
+    }
+  }
+
+  #
+  # NOTE: This procedure make sure (miscellaneous?) encryption parameters
+  #       are initialized or cleaned up.
+  #
+  proc setupEncryptionParameters { setup } {
+    global zeus
+
+    if {$setup} then {
+      set zeus(encodingName) utf-8
+      set zeus(iterationCount) 1000
+      set zeus(hashAlgorithmName) ""
+    } else {
+      foreach varName [list \
+          hashAlgorithmName iterationCount encodingName] {
+        unset -nocomplain -zerostring -purge -- zeus($varName)
+      }
+    }
+  }
+
+  #
+  # NOTE: This procedure checks for needed global state and then hooks the
+  #       [getUpdateScriptData] from the core script library, which allows
+  #       our code to transparently perform necessary extra steps, such as
+  #       decryption, prior to evaluating update scripts, if needed.
+  #
+  proc hookGetUpdateScriptData {} {
+    global zeus
+
+    if {[llength [info commands __getUpdateScriptData]] > 0} then {return}
+
+    if {![info exists zeus(encodingName)] || \
+        [string length $zeus(encodingName)] == 0} then {
+      error "the Zeus encoding name is invalid or not set"
+    }
+
+    if {![info exists zeus(password)] || \
+        [string length $zeus(password)] == 0} then {
+      error "the Zeus password is invalid or not set"
+    }
+
+    if {![info exists zeus(salt)] || \
+        [string length $zeus(salt)] == 0} then {
+      error "the Zeus salt is invalid or not set"
+    }
+
+    if {![info exists zeus(iterationCount)] || \
+        [string length $zeus(iterationCount)] == 0} then {
+      error "the Zeus iteration count is invalid or not set"
+    }
+
+    if {![info exists zeus(hashAlgorithmName)]} then {
+      error "the Zeus hash algorithm name is not set"
+    }
+
+    if {0} then {
+      #
+      # NOTE: *LEGACY* Having an empty string as the hash algorithm
+      #       name is allowed for backward compatibility.  It means
+      #       the legacy default hash algorithm will be used.
+      #
+      if {[string length $zeus(hashAlgorithmName)] == 0} then {
+        error "the Zeus hash algorithm name is invalid"
+      }
+    }
+
+    package require Zeus.Enterprise
+    package require Zeus.Cryptography
+
+    set args [info args getUpdateScriptData]
+    rename getUpdateScriptData __getUpdateScriptData
+
+    lappend args \
+        [list encodingName $zeus(encodingName)] \
+        [list password $zeus(password)] \
+        [list salt $zeus(salt)] \
+        [list iterationCount $zeus(iterationCount)] \
+        [list hashAlgorithmName $zeus(hashAlgorithmName)]
+
+    proc getUpdateScriptData $args {
+      set data [uplevel 1 __getUpdateScriptData $uri]
+      if {![isEncryptedScript $data]} then {return $data}
+
+      return [decryptScript \
+          [eval $data] $encodingName $password $salt $iterationCount \
+          $hashAlgorithmName]
+    }
+  }
+
+  #
+  # NOTE: This procedure unhooks the [getUpdateScriptData] procedure from
+  #       the core script library.  It does not cleanup any other global
+  #       state.
+  #
+  proc unhookGetUpdateScriptData {} {
+    if {[llength [info commands __getUpdateScriptData]] == 0} then {return}
+
+    rename getUpdateScriptData ""
+    rename __getUpdateScriptData getUpdateScriptData
+  }
+
+  #
+  # NOTE: This procedure is a high-level interface for external scripts.
+  #       It can install or uninstall the Zeus update hook.
+  #
+  # <public>
+  proc enableZeusUpdateHook { {enable ""} } {
+    global zeus
+
+    if {[string length $enable] > 0} then {
+      if {$enable} then {
+        setupEncryptionParameters true
+        setupEncryptionPasswordAndSalt true
+
+        hookGetUpdateScriptData
+      } else {
+        unhookGetUpdateScriptData
+
+        setupEncryptionPasswordAndSalt false
+        setupEncryptionParameters false
+      }
+
+      debug cleanup; debug collect
+    } else {
+      return [expr {[llength [info commands __getUpdateScriptData]] > 0}]
+    }
+  }
+
+  #
+  # NOTE: This procedure cleans up (i.e. removes) all procedures that were
+  #       added by this script.  It does not cleanup any other global state.
+  #
+  # <public>
+  proc cleanupZeusUpdateHook {} {
+    catch {
+      rename setupEncryptionPasswordAndSalt ""
+      rename setupEncryptionParameters ""
+      rename hookGetUpdateScriptData ""
+      rename unhookGetUpdateScriptData ""
+      rename enableZeusUpdateHook ""
+      rename cleanupZeusUpdateHook ""
+    }
+  }
+
+  #
+  # NOTE: Provide the Zeus "update" package to the interpreter.
+  #
+  package provide Zeus.Update \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+

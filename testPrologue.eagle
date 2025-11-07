@@ -1,0 +1,235 @@
+###############################################################################
+#
+# testPrologue.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# User Test Prologue File for Lacyrmose
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+if {[isEagle]} then {
+  apply [list [list] {
+    # <help>
+    # This procedure removes all cached information from the private
+    # array used by the debugger and interactive loop subsystems, i.e.
+    # the "eagle_debugger" global variable.
+    # </help>
+
+    array unset ::eagle_debugger processOwner,*
+  }]
+
+  apply [list [list] {
+    # <help>
+    # This procedure disables the command history feature if it is
+    # available and currently enabled.
+    # </help>
+
+    if {[catch {
+      debug history; # NOTE: Is command history enabled?
+    } result] == 0 && $result} then {
+      if {[catch {
+        debug history false; # NOTE: Ok, disable it now.
+      } error] == 0} then {
+        if {[info exists ::test_channel]} then {
+          tputs $::test_channel \
+              "---- forcibly disabled command history\n"
+        }
+      } else {
+        if {[info exists ::test_channel]} then {
+          tputs $::test_channel [appendArgs \
+              "---- could not disable command history, error: " \
+              $error \n]
+        }
+      }
+    }
+  }]
+
+  apply [list [list] {
+    # <help>
+    # This procedure changes the value of the test suite variable
+    # related to diagnostic output from native Tcl shell usage.
+    # </help>
+
+    #
+    # NOTE: This value controls the overall level of verbosity when
+    #       evaluating a native Tcl script (via an external shell).
+    #       The following values are supported:
+    #
+    #       0 - No output.
+    #
+    #       1 - Emit a test log message when the native Tcl shell
+    #           is missing -OR- returns an error.
+    #
+    #       2 - Emit a test log message with the native Tcl script
+    #           unique identifier (i.e. hash code) and its result.
+    #
+    #       3 - Emit a test log message with the native Tcl script
+    #           text, its unique identifier (i.e. hash code), and
+    #           its result.
+    #
+    #       4 - Return the native Tcl script error message instead
+    #           of the literal string "error".
+    #
+    #       5 - Raise script errors if any phase of the Tcl script
+    #           evaluation fails for any reason.
+    #
+    package require Eagle.Test
+
+    if {[isOfficialStableReleaseInProgress]} then {
+      set ::test_tclsh_verbose 0;    # HACK: Silence for release builds.
+    } else {
+      set ::test_tclsh_verbose 3;    # TODO: Remove after Beta 45 (why?).
+    }
+
+    if {[info exists ::test_channel]} then {
+      tputs $::test_channel [appendArgs \
+          "---- forcibly reset verbosity level for native Tcl shell: " \
+          $::test_tclsh_verbose \n]
+    }
+  }]
+
+  apply [list [list] {
+    # <help>
+    # This procedure modifies the values of several test suite variables
+    # to account for the custom configuration needed during development.
+    # </help>
+
+    set ::test_timeout 20000;        # NOTE: Make timeouts more obvious?
+
+    if {![isOfficialStableReleaseInProgress]} then {
+      if {![info exists ::tcl_platform(host)] || \
+          $::tcl_platform(host) ne "DESKTOP-N5Q9D24"} then {
+        set ::test_wait(post) 5000;  # NOTE: Wait between test files.
+      }
+    }
+
+    set ::no(cleanState) 1;          # NOTE: Do not remove stray "stuff".
+    set ::no(showEndingUsageData) 1; # NOTE: Normally, this is not needed.
+    # set ::no(tls12HostsFile) 1;    # NOTE: Fails on .NET Core 2.x.
+    set ::no(tls13HostsFile) 1;      # NOTE: Windows 10 (?) is required, so no.
+    set ::no(getOwnerForProcess) 1;  # NOTE: Quite slow.
+
+    #
+    # NOTE: These are too slow (e.g. on Windows) for regular test runs, so
+    #       disable them.
+    #
+    set ::no(query,processes) 1
+    set ::no(query,temporaryFiles) 1
+
+    #
+    # NOTE: Record test resource statistics and reporting leaks appears to
+    #       be quite time-consuming; therefore, disable that if requested.
+    #
+    if {[info exists ::no(NoRecordPerTestStatistics)] || \
+        [info exists ::env(NoRecordPerTestStatistics)]} then {
+      set ::no(leak,runTest) 1
+    }
+
+    #
+    # NOTE: These are currently hosted on the LangDemo test cluster.
+    #
+    set ::no(missingTimeServerUri) 1;    # https://urn.to/r/get_time_07
+    set ::no(missingLibraryServerUri) 1; # https://urn.to/r/get_license_07
+
+    #
+    # NOTE: These are currently hosted on the Kapok test cluster.
+    #
+    set ::no(missingCertificateRequestServerUri) 1; # https://urn.to/r/license
+    set ::no(missingCertificateProvisionServerUri) 1; # https://urn.to/r/provision
+
+    #
+    # NOTE: Disable waiting after a call to [logRemoteMessage], et al.
+    #
+    set ::env(NoDelayForTest) 1
+
+    #
+    # NOTE: Disable the custom Eagle shell prompt during tests, e.g. Demo.
+    #
+    catch {eagle_setupPromptScript false}; # NOTE: Forcibly disable now.
+    set ::env(NoTclPrompt1) 1; # NOTE: Prevent [eagle_setupPromptScript].
+
+    #
+    # NOTE: Disable seamless Eagle <==> operating system shell integration.
+    #
+    catch {eagle_enableShellUnknown false}; # NOTE: Forcibly disable now.
+    set ::env(NoShellUnknown) 1; # NOTE: Prevent [eagle_enableShellUnknown].
+
+    # NOTE: This makes the Harpy test suite fairly noisy.
+    # set ::env(WriteWithoutFail) 1; # NOTE: Harpy [writeWithoutFail] output.
+
+    if {[info exists ::test_channel]} then {
+      tputs $::test_channel \
+          "---- forcibly reset test suite variables and prohibitions\n"
+    }
+  }]
+
+  apply [list [list] {
+    # <help>
+    # This procedure adds several runtime options to the current
+    # interpreter that are related to the core library test suite.
+    # </help>
+
+    addRuntimeOption logExtraTestResults
+    addRuntimeOption logExtraTestRunMessage
+    addRuntimeOption failFastForExecStress; # exec-2.1
+    # addRuntimeOption maybeUseLoopbackForExecStress; # exec-2.1
+    # addRuntimeOption maybeUseThreadsForExecStress; # exec-2.1
+    addRuntimeOption saveBadOutputForExecStress; # exec-2.1
+    addRuntimeOption saveCaptureDataForExecStress; # exec-2.1
+
+    if {[info exists ::test_channel]} then {
+      tputs $::test_channel [appendArgs \
+          "---- forcibly added test suite runtime options, now: " \
+          [formatList [lsort [listRuntimeOptions]] <none>] \n]
+    }
+  }]
+
+  apply [list [list] {
+    # <help>
+    # Force the complaint subsystem to include complete managed call stacks
+    # right after the actual text of the complaint.
+    # </help>
+
+    if {![info exists ::no(NoForceTraceStack)]} then {
+      #
+      # HACK: It is highly likely that this should actually be part of
+      #       the default interpreter flags.
+      #
+      catch {
+        enableInterpreterFlags TraceStack true; # complaint stack traces...
+      }
+    }
+  }]
+
+  apply [list [list] {
+    # <help>
+    # This procedure arranges for the [xxxTestLog] procedures to be hooked
+    # in order to seamlessly integrate with (i.e. launch) the external log
+    # monitor tool in the background, etc.
+    # </help>
+
+    #
+    # HACK: Hook-up the test suite log file watchdog detection now.
+    #
+    if {![info exists ::no(NoHookTestLogForWatchCat)] && \
+        ![info exists ::env(NoHookTestLogForWatchCat)]} then {
+      catch {
+        #
+        # NOTE: For [getTestLog] / [newTestLog].
+        #
+        package require Eagle.Test
+
+        hookGetTestLogForWatchCat true true
+        hookNewTestLogForWatchCat true true
+      }
+    }
+  }]
+}
+

@@ -1,0 +1,40 @@
+###############################################################################
+#
+# startup-lister.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Tcl/Tk & Eagle Shell Startup File Lister
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+apply [list [list script] {
+  set result [list]
+
+  source [file join \
+      [file dirname $script] Settings startup-settings-files.eagle]
+
+  if {[info exists phases]} then {
+    foreach phase $phases {
+      if {[info exists directories($phase)]} then {
+        set directory $directories($phase)
+      } else {
+        set directory $path
+      }
+
+      if {[info exists fileNamesOnly($phase)]} then {
+        foreach fileNameOnly $fileNamesOnly($phase) {
+          lappend result [file join $directory $fileNameOnly]
+        }
+      }
+    }
+  }
+
+  return $result
+}] [info script]

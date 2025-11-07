@@ -1,0 +1,105 @@
+###############################################################################
+#
+# sms.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Short Message Service (SMS) Package
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Eagle {
+  proc isValidShortMessage { message {type typical} } {
+    set pattern {^[ 0-9A-Za-z}
+
+    switch -exact -- $type {
+      limited {
+        # do nothing.
+      }
+      typical {
+        #
+        # NOTE: Used for DateTime formats, e.g. ISO-8601.
+        #
+        append pattern {\-:}
+      }
+      full {
+        #
+        # TODO: Verify that this set of characters is actually
+        #       present in the official specification for the
+        #       SMS protocol.
+        #
+        append pattern {!\"#\$%&'()*+,\-./:;<=>?@[\]^_`{|}~}
+        append pattern {\u00A1\u00A3\u00A5\u00A7\u00BF\u00C4}
+        append pattern {\u00D6\u00DC\u00DF\u00E4\u00F6\u00FC}
+      }
+      default {
+        return false
+      }
+    }
+
+    append pattern {]{1,160}$}
+
+    return [regexp -- $pattern $message]
+  }
+
+  proc sendViaShortMessageService { accountSid authToken from to message } {
+    if {![regexp -- {^AC[0-9A-Fa-f]{32}$} $accountSid]} then {
+      error "bad Twilio account string identifier"
+    }
+
+    if {![regexp -- {^[0-9A-Fa-f]{32}$} $authToken]} then {
+      error "bad Twilio authorization token"
+    }
+
+    if {![regexp -- {^\+1\d{10}$} $from]} then {
+      error "bad source phone number"
+    }
+
+    if {![regexp -- {^\+1\d{10}$} $to]} then {
+      error "bad target phone number"
+    }
+
+    if {![isValidShortMessage $message]} then {
+      error "bad short message length or content"
+    }
+
+    set baseUri https://api.twilio.com/2010-04-01; # TODO: Update?
+
+    set uri [appendArgs \
+        $baseUri /Accounts/ $accountSid /Messages.json]; # TODO: Update?
+
+    set command [list exec -success Success --]
+
+    if {[info exist ::curl]} then {
+      lappend command [appendArgs \" $::curl \"]
+    } else {
+      lappend command curl
+    }
+
+    lappend command -X POST [appendArgs \" $uri \"]
+    lappend command --data-urlencode [appendArgs \" From= $from \"]
+    lappend command --data-urlencode [appendArgs \" To= $to \"]
+    lappend command --data-urlencode [appendArgs \" Body= $message \"]
+    lappend command -u [appendArgs \" $accountSid : $authToken \"]
+
+    return [eval $command]
+  }
+
+  #
+  # NOTE: Provide the Eagle "sms" package to the interpreter.
+  #
+  package provide Eagle.Sms \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+

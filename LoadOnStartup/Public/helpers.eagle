@@ -1,0 +1,257 @@
+###############################################################################
+#
+# helpers.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Startup Library Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval :: {
+  proc checkIsEagle {} {
+    return [expr {[catch {isEagle} result] == 0 && $result}]
+  }
+
+  proc checkEaglePatchLevel { patchLevel } {
+    if {![info exists ::eagle_platform(patchLevel)]} then {
+      #
+      # NOTE: Either not Eagle -OR- there is purposely no patch level.
+      #
+      return false
+    }
+
+    if {[package vcompare \
+        $::eagle_platform(patchLevel) $patchLevel] > 0} then {
+      #
+      # NOTE: Greater than the specified patch level.
+      #
+      return false
+    }
+
+    #
+    # NOTE: Less than or equal to the specified patch level.
+    #
+    return true
+  }
+
+  proc runBadgeTestScript { iis local } {
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the XDG_STARTUP_HOME environment variable is not set"
+    }
+
+    if {[info exists ::argv]} then {
+      if {[lsearch -exact -- $::argv -runAllBadgeTests] == -1} then {
+        lappend ::argv -runAllBadgeTests true
+      }
+    } else {
+      set ::argv [list -runAllBadgeTests true]
+    }
+
+    if {![info exists ::argv] || \
+        [lsearch -exact -- $::argv -iis] == -1} then {
+      lappend ::argv -iis $iis
+    }
+
+    if {![info exists ::argv] || \
+        [lsearch -exact -- $::argv -localhost] == -1} then {
+      lappend ::argv -localhost $local
+    }
+
+    uplevel 1 [list source [file join \
+        $::env(XDG_STARTUP_HOME) Scripts Public badgeTest.eagle]]
+  }
+
+  proc runHarpyTestScript { quick iis local } {
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    lappend ::argv -iis $iis
+    lappend ::argv -localhost $local
+
+    array set savedNo [array get ::no]
+
+    if {$quick} then {
+      set ::no(timeIntensive) 1; # HACK: Skip flags tests.
+    } else {
+      unset -nocomplain ::no(timeIntensive)
+    }
+
+    try {
+      uplevel 1 [list source [file join $::env(EAGLE) \
+          Plugins Commercial Enterprise Harpy Tests all.eagle]]
+    } finally {
+      unset -nocomplain ::no(timeIntensive)
+
+      array set ::no [array get savedNo]
+      unset -nocomplain savedNo
+    }
+  }
+
+  proc maybeCreateBackupPath { path } {
+    if {[string length $path] == 0} then {
+      return $path
+    }
+
+    set fileNameOnly [file tail $path]
+
+    if {[string length $fileNameOnly] == 0} then {
+      return $path
+    }
+
+    set rootName [file rootname $fileNameOnly]
+
+    if {[string length $rootName] == 0} then {
+      return $path
+    }
+
+    set directory [file dirname $path]
+    set extension [file extension $fileNameOnly]
+
+    return [file join \
+        $directory [appendArgs $rootName . [clock seconds] \
+        $extension]]
+  }
+
+  proc forceUseLatestTestPackage { directory } {
+    set fileName [file normalize [file join \
+        $directory lib Eagle1.0 test.eagle]]
+
+    if {[file exists $fileName]} then {
+      uplevel #0 [list \
+          package ifneeded Eagle.Test 1.0 \
+          [list sourceWithInfo $fileName]]
+
+      if {[catch {
+        package present Eagle.Test
+      }] == 0} then {
+        #
+        # NOTE: Package already loaded, force reload.
+        #
+        uplevel #0 [list source $fileName]
+
+        return Loaded
+      } else {
+        return Setup
+      }
+    } else {
+      return Skipped
+    }
+  }
+
+  proc maybeForceUseLatestTestPackage {} {
+    if {![info exists ::no(useLatestTestPackage)]} then {
+      if {[info exists ::env(EAGLE)]} then {
+        set interactive [expr {
+          [info exists ::tcl_interactive] && $::tcl_interactive
+        }]
+
+        set action [forceUseLatestTestPackage $::env(EAGLE)]
+
+        if {$interactive && 0} then {
+          host result Ok [appendArgs \
+              $action " the development test package.\n"]
+        }
+      }
+    }
+  }
+
+  proc hexConstify { list } {; # this is garbage... list of what?  verify?
+    set count 0
+    set result ""
+
+    foreach element $list {
+      if {$count > 0 && [string length $result] > 0} then {
+        append result " "
+      }
+
+      append result 0x [string tolower $element] ,
+      incr count
+
+      if {$count == 8} then {
+        append result \r\n
+        set count 0
+      }
+    }
+
+    return [string trim $result ,]
+  }
+
+  #
+  # TODO: Is this really still needed at all?  The Eyrie "project" is
+  #       dead, having been replaced by the Package Repository Server
+  #       (i.e. pkgr, pkgd, pkgu, et al).  This does show a nice way
+  #       of dealing with extra auto-path fragments on a "per-project"
+  #       basis.
+  #
+  proc addKapokLibToAutoPath {} {
+    #
+    # NOTE: Check if the Kapok library path (mainly for Eyrie) needs
+    #       to be added to the Eagle auto-path.
+    #
+    if {[info exists ::env(EAGLE)]} then {
+      set dir [file normalize [file join \
+          $::env(EAGLE) Plugins Commercial Enterprise Kapok lib]]
+
+      if {[file exists $dir]} then {
+        lappend ::auto_path $dir
+      }
+
+      unset -nocomplain dir
+    }
+  }
+
+  proc disableCountInPrompt { channel {varName savedCountInPrompt} } {
+    upvar 1 $varName savedCountInPrompt
+
+    if {![info exists savedCountInPrompt]} then {
+      if {[catch {
+        set savedCountInPrompt [object invoke \
+            -flags +NonPublic Interpreter.GetActive promptFlags]
+
+        object invoke -flags +NonPublic -objectflags \
+            +AutoFlagsEnum Interpreter.GetActive promptFlags \
+            -Count
+      } error] == 0} then {
+        tputs $channel [appendArgs \
+            "---- disabled count-in-prompt, previously: " \
+            $savedCountInPrompt \n]
+      } else {
+        tputs $channel [appendArgs \
+            "---- failed to disable count-in-prompt, error: " \
+            $error \n]
+      }
+    }
+  }
+
+  proc restoreCountInPrompt { channel {varName savedCountInPrompt} } {
+    upvar 1 $varName savedCountInPrompt
+
+    if {[info exists savedCountInPrompt]} then {
+      if {[catch {
+        object invoke -flags +NonPublic \
+            Interpreter.GetActive promptFlags $savedCountInPrompt
+
+        unset savedCountInPrompt
+      } error] == 0} then {
+        tputs $channel "---- restored saved count-in-prompt\n"
+      } else {
+        tputs $channel [appendArgs \
+            "---- failed to restore saved count-in-prompt, error: " \
+            $error \n]
+      }
+    }
+  }
+}
+

@@ -1,0 +1,27 @@
+###############################################################################
+#
+# shellWorker.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Worker Startup Script (Asynchronous)
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+if {1} then {
+  apply [list [list] {
+    if {![info exists ::no(NoWorkerThread)] && \
+        ![info exists ::env(NoWorkerThread)]} then {; # NOTE: Forbidden?
+      if {[info tid] != [info ptid]} then {; # NOTE: Do NOT block main thread.
+        debug output [appendArgs \
+            "The shell is now running on thread " [info tid] .]
+      }
+    }
+  }]
+}

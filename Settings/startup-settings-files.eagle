@@ -1,0 +1,66 @@
+###############################################################################
+#
+# startup-settings-files.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Tcl/Tk & Eagle Shell Startup Files Settings Script
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+apply [list [list script] {
+  set path [file normalize [file dirname [file dirname $script]]]
+
+  #############################################################################
+
+  upvar 1 phases phases
+  upvar 1 fileNamesOnly fileNamesOnly
+  upvar 1 directories directories
+
+  #############################################################################
+
+  set directories(public) [file join $path LoadOnStartup Public]
+  set directories(watchCat) [file join $path WatchCat]
+  set directories(private) [file join $path LoadOnStartup Private]
+  set directories(settings) [file join $path Settings]
+
+  #############################################################################
+
+  set fileNamesOnly(public) {
+    backcompat.eagle
+    chat.eagle
+    helpers.eagle
+    history.eagle
+    intExtCmds.eagle
+    secrets.eagle
+    sms.eagle
+  }
+
+  set fileNamesOnly(watchCat) {
+    watchCat.eagle
+  }
+
+  set fileNamesOnly(private) {
+    auth.eagle
+    intExtCmds_private.eagle
+  }
+
+  set fileNamesOnly(settings) {
+    startup-settings.eagle
+  }
+
+  #############################################################################
+
+  set phases {
+    public
+    watchCat
+    private
+    settings
+  }
+}] [info script]

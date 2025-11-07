@@ -1,0 +1,1775 @@
+###############################################################################
+#
+# history.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Interactive Command History
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval :: {
+  proc eagle_showHistoryHelp {} {
+    if {![info exists ::no(showHistoryHelp)]} then {
+      set textFlags [object invoke -flags +NonPublic \
+          Eagle._Components.Private.HelpOps GetDefaultTextFlags]
+
+      set help [object invoke -flags +NonPublic \
+          Eagle._Components.Private.HelpOps ExtractHelpFromScript \
+          [info body eagle_getProcedureMap] $textFlags]
+
+      if {[string length $help] > 0} then {
+        host result Break [appendArgs \n $help \n\n]
+      }
+    }
+  }
+
+  proc eagle_getProcedureMap {} {
+    # <help>
+    # The list of available history management commands are:
+    #
+    #     1.  "#!": Find and stage the latest matched-any command.
+    #     2. "#!!": Find and stage the latest matched-all command.
+    #     3.  "#@": Evaluate the staged command (or fail).
+    #     4. "#@@": Reset the staged command (or fail).
+    #     5. "##!": Find and return all matching commands.
+    #     6. "##0": Import commands into the database file.
+    # </help>
+    #
+    # NOTE: Each search command entry in the following list has seven
+    #       elements:
+    #
+    #           1. The command name to create, e.g. "#!".
+    #           2. The match index value, e.g. "end".
+    #           3. The match limit value, e.g. 1.
+    #           4. The matchAll flag value, e.g. false.
+    #           5. The useDatabase flag value, e.g. true.
+    #           6. The importOnly flag value, e.g. false.
+    #           7. The whatIf flag value, e.g. true.
+    #
+    return [list \
+         "#!" end 1 false  true false     1 \
+        "#!!" end 1  true  true false     1 \
+         "#@" end 1 false  true false     2 \
+        "#@@"  -1 0 false  true false     3 \
+        "##!"  -1 0 false  true false  true \
+        "##0"  -1 0 false  true  true     4 \
+    ]
+  }
+
+  proc eagle_isHistoryCommand { text } {
+    set length [string length $text]
+
+    if {$length > 0} then {
+      set commands [eagle_getProcedureMap]
+
+      foreach {
+        commandName index limit matchAll useDatabase importOnly whatIf
+      } $commands {
+        set commandLength [string length $commandName]
+
+        if {$length >= $commandLength} then {
+          set endIndex [expr {$commandLength - 1}]
+          set prefix [string range $text 0 $endIndex]
+
+          if {$prefix eq $commandName} then {
+            return true
+          }
+        }
+      }
+    }
+
+    return false
+  }
+
+  proc eagle_setupCommandSearchProcedures {} {
+    set commands [eagle_getProcedureMap]
+    set baseCommandName eagle_evaluateCommandFrom
+
+    foreach {
+      commandName index limit matchAll useDatabase importOnly whatIf
+    } $commands {
+      set args [info args $baseCommandName]
+      set body [info body $baseCommandName]
+
+      set body [string map [list \
+          %commandName% $commandName %index% $index %limit% $limit \
+          %matchAll% $matchAll %useDatabase% $useDatabase %importOnly% \
+          $importOnly %whatIf% $whatIf] $body]
+
+      proc $commandName $args $body
+    }
+  }
+
+  proc eagle_resetStagedCommand { {default ""} } {
+    upvar #0 eagle_debugger debugger
+
+    if {[info exists debugger(StagedCommand)]} then {
+      set result $debugger(StagedCommand)
+      unset -nocomplain debugger(StagedCommand)
+      return $result
+    }
+
+    return $default
+  }
+
+  proc eagle_setStagedCommand { command {default ""} } {
+    upvar #0 eagle_debugger debugger
+
+    if {[info exists debugger(StagedCommand)]} then {
+      set result $debugger(StagedCommand)
+      set debugger(StagedCommand) $command
+      return $result
+    } else {
+      set debugger(StagedCommand) $command
+      return $default
+    }
+  }
+
+  proc eagle_evaluateStagedCommand {} {
+    upvar #0 eagle_debugger debugger
+
+    if {[info exists debugger(StagedCommand)]} then {
+      set command $debugger(StagedCommand)
+
+      if {[catch [list uplevel 1 $command] result] == 0} then {
+        unset -nocomplain debugger(StagedCommand)
+        return $result
+      } else {
+        error $result
+      }
+    } else {
+      error "there is no staged command"
+    }
+  }
+
+  proc eagle_processSearchArguments { args } {
+    foreach name [list \
+        any mode index limit autoWildcard noCase useDatabase \
+        importOnly quiet verbose whatIf searches] {
+      upvar 1 $name $name
+    }
+
+    foreach {name value} $args {
+      switch -exact -- $name {
+        any -
+        autoWildcard -
+        noCase -
+        matchAll -
+        useDatabase -
+        importOnly -
+        quiet -
+        verbose -
+        whatIf {
+          if {[string is boolean -strict $value]} then {
+            set $name $value
+
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Boolean option \"" $name "\" set to value \"" \
+                  [set $name] "\".\n"]
+            }
+          } else {
+            if {!$quiet} then {
+              error [appendArgs \
+                  "bad \"" $name "\" search option value \"" \
+                  $value "\", must be boolean"]
+            }
+          }
+        }
+        index {
+          if {[string is integer -strict $value] || \
+              $value eq "end" || \
+              [regexp -- {^end-\d+$} $value]} then {
+            set $name $value
+
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Index option \"" $name "\" set to value \"" \
+                  [set $name] "\".\n"]
+            }
+          } else {
+            if {!$quiet} then {
+              error [appendArgs \
+                  "bad \"" $name "\" search option value \"" \
+                  $value "\", must be integer"]
+            }
+          }
+        }
+        limit {
+          if {[string is integer -strict $value]} then {
+            set $name $value
+
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Integer option \"" $name "\" set to value \"" \
+                  [set $name] "\".\n"]
+            }
+          } else {
+            if {!$quiet} then {
+              error [appendArgs \
+                  "bad \"" $name "\" search option value \"" \
+                  $value "\", must be integer"]
+            }
+          }
+        }
+        mode {
+          if {$value in [list "" exact glob regexp]} then {
+            set $name [list $value]
+
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Mode option \"" $name "\" set to value \"" \
+                  [set $name] "\".\n"]
+            }
+          } else {
+            if {!$quiet} then {
+              error [appendArgs \
+                  "bad \"" $name "\" search option value \"" \
+                  $value "\", must be empty string, exact, " \
+                  "glob, or regexp"]
+            }
+          }
+        }
+        search {
+          lappend searches $value
+
+          if {$verbose} then {
+            host result Continue [appendArgs \
+                "Also searching for: " $value \n]
+          }
+        }
+        default {
+          if {!$quiet} then {
+            error [appendArgs "bad search option: " $name]
+          }
+        }
+      }
+    }
+  }
+
+  proc eagle_getCmdsDirectory {} {
+    if {[info exists ::env(EAGLE_USER_CMDS_DIR)]} then {
+      return $::env(EAGLE_USER_CMDS_DIR)
+    } elseif {[info exists ::env(XDG_STATE_HOME)]} then {
+      return $::env(XDG_STATE_HOME)
+    } else {
+      return ~
+    }
+  }
+
+  proc eagle_getCmdsFileName {
+          {quiet false} {verbose false} {readOnly true} {fileTypeVarName ""}
+          {seqNumVarName ""} } {
+    upvar #0 eagle_debugger debugger
+
+    set directory [eagle_getCmdsDirectory]
+
+    if {[info exists debugger(saveUniqueCmdsFile)]} then {
+      #
+      # HACK: Attempt to figure out the next sequence number to
+      #       use when saving the interactive commands.  There
+      #       may end up being gaps, i.e. when the user cancels
+      #       this save operation after we allocate the sequence
+      #       number.
+      #
+      set seqNumFileName \
+          [file normalize [file join $directory cmds.eagle.seqNum]]
+
+      if {[file exists $seqNumFileName]} then {
+        if {[file size $seqNumFileName] == 19} then {
+          set seqNumData [string trim [readFile $seqNumFileName]]
+        } else {
+          #
+          # HACK: Do not overwrite the command sequence file if
+          #       it contains weird data.
+          #
+          if {[file size $seqNumFileName] > 0} then {
+            if {!$quiet} then {
+              host result Error [appendArgs \
+                  "Malformed command sequence number file \"" \
+                  $seqNumFileName "\", must be 19 bytes.\n"]
+            }
+
+            #
+            # NOTE: Return an empty string, this will prevent
+            #       the originally entered command from being
+            #       executed, thus enabling the user to cancel.
+            #
+            return ""
+          } else {
+            if {!$quiet} then {
+              host result Continue [appendArgs \
+                  "Zero byte command sequence number file \"" \
+                  $seqNumFileName "\", must be 19 bytes.\n"]
+            }
+
+            #
+            # NOTE: Weird?  For some reason, zero byte file?
+            #
+            set seqNumData ""
+          }
+        }
+      } else {
+        set seqNumData ""
+      }
+
+      if {[string is wideinteger -strict $seqNumData]} then {
+        incr seqNumData
+      } else {
+        set seqNumData [expr {random() ^ [info context]}]
+      }
+
+      if {[string length $seqNumVarName] > 0} then {
+        upvar 1 $seqNumVarName seqNum
+      }
+
+      set seqNum [format %016lX $seqNumData]
+
+      if {$verbose} then {
+        host result Continue [appendArgs \
+            "Command sequence number: " $seqNum \n]
+      }
+
+      if {!$readOnly} then {
+        writeFile $seqNumFileName [appendArgs 0x $seqNum \n]
+      }
+
+      set fileName [file normalize \
+          [file join $directory [appendArgs cmds- $seqNum .eagle]]]
+
+      if {[string length $fileTypeVarName] > 0} then {
+        upvar 1 $fileTypeVarName fileType
+
+        if {[file exists $fileName]} then {
+          set fileType "existing uniquely"
+        } else {
+          set fileType uniquely
+        }
+      }
+
+      return $fileName
+    } else {
+      if {[string length $seqNumVarName] > 0} then {
+        upvar 1 $seqNumVarName seqNum
+      }
+
+      set seqNum none
+
+      set fileName [file normalize [file join $directory cmds.eagle]]
+
+      if {[string length $fileTypeVarName] > 0} then {
+        upvar 1 $fileTypeVarName fileType
+
+        if {[file exists $fileName]} then {
+          set fileType "existing shared"
+        } else {
+          set fileType shared
+        }
+      }
+
+      return $fileName
+    }
+  }
+
+  proc eagle_getCmdsDatabaseFileName { fileName {force false} } {
+    if {[string length $fileName] > 0} then {
+      return [appendArgs $fileName .db]
+    } elseif {$force} then {
+      return [file normalize \
+          [file join [eagle_getCmdsDirectory] cmds.db]]
+    } else {
+      return ""
+    }
+  }
+
+  proc eagle_checkSearchCommandsMode {
+          modeVarName noCaseVarName autoWildcardVarName matchAllVarName
+          useDatabaseVarName importOnlyVarName quietVarName verboseVarName } {
+    upvar 1 $modeVarName mode
+    upvar 1 $autoWildcardVarName autoWildcard
+    upvar 1 $noCaseVarName noCase
+    upvar 1 $matchAllVarName matchAll
+    upvar 1 $useDatabaseVarName useDatabase
+    upvar 1 $importOnlyVarName importOnly
+    upvar 1 $quietVarName quiet
+    upvar 1 $verboseVarName verbose
+
+    set index [lsearch -exact -nocase -- $mode autoWildcard]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set autoWildcard true
+    }
+
+    set index [lsearch -exact -nocase -- $mode noCase]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set noCase true
+    }
+
+    set index [lsearch -exact -nocase -- $mode matchAll]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set matchAll true
+    }
+
+    set index [lsearch -exact -nocase -- $mode useDatabase]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set useDatabase true
+    }
+
+    set index [lsearch -exact -nocase -- $mode importOnly]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set importOnly true
+    }
+
+    set index [lsearch -exact -nocase -- $mode quiet]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set quiet true
+    }
+
+    set index [lsearch -exact -nocase -- $mode verbose]
+
+    if {$index != -1} then {
+      set mode [lreplace $mode $index $index]
+      set verbose true
+    }
+  }
+
+  proc eagle_getConnectionString { {readOnly true} } {
+    set result {Data Source=${fileName};}
+
+    if {$readOnly} then {
+      append result {Read Only=true;}
+    }
+
+    append result {DateTimeKind=Utc;}
+    append result {DateTimeFormat=UnixEpoch;}
+
+    return $result
+  }
+
+  proc eagle_getConnectionObject { {varName connection} } {
+    upvar 1 $varName connection
+
+    if {[info exists connection]} then {
+      if {[catch {
+        object invoke -flags +NonPublic -objectflags \
+            +NoDispose -objectname $connection -alias \
+            Interpreter.GetActive.connections Item $connection
+      } result] == 0} then {
+        return $result
+      } else {
+        error [appendArgs \
+            "failed to get object handle for database connection \"" \
+            $connection "\", error: " \n\t $result \n]
+      }
+    } else {
+      error "database connection appears to be unavailable"
+    }
+  }
+
+  proc eagle_getSQLiteBinaryFileName {} {
+    set fileName [file join [file dirname \
+        [getShellExecutableName]] SQLite.Interop.dll]
+
+    if {![file trusted $fileName]} then {
+      error [appendArgs \
+          "cannot load SQLite interop assembly \"" \
+          $fileName "\", it is not trusted"]
+    }
+
+    return $fileName
+  }
+
+  proc eagle_maybeOpenDatabase {
+          fileName {readOnly true} {varName connection} } {
+    upvar 1 $varName connection
+
+    if {[lsearch -exact -- [info subcommands sql] isopen] != -1 && \
+        [info exists connection] && [sql isopen $connection]} then {
+      return false
+    } else {
+      return [eagle_openDatabase $fileName $readOnly connection]
+    }
+  }
+
+  proc eagle_openDatabase { fileName {readOnly true} {varName connection} } {
+    upvar 1 $varName connection
+
+    set connection [sql open \
+        -type SQLite [subst [eagle_getConnectionString $readOnly]]]
+
+    set object [eagle_getConnectionObject connection]
+
+    #
+    # HACK: The System.Data.SQLite assembly from the externals
+    #       directory has no REGEXP extension; therefore, just
+    #       wrap the attempt to load it in a [catch] block.
+    #
+    if {[lsearch -exact -- [object invoke \
+          System.Data.SQLite.SQLiteConnection \
+          InteropCompileOptions] REGEXP_EXTENSION] != -1} then {
+      $object EnableExtensions true
+
+      $object LoadExtension \
+          [eagle_getSQLiteBinaryFileName] sqlite3_regexp_init
+    }
+
+    return true
+  }
+
+  proc eagle_closeDatabase { {varName connection} } {
+    upvar 1 $varName connection
+
+    if {[info exists connection]} then {
+      object dispose $connection
+      sql close $connection
+      unset -nocomplain connection
+    }
+
+    return ""
+  }
+
+  proc eagle_clearCommandsInDatabase { fileName } {
+    try {
+      eagle_openDatabase $fileName false
+
+      sql execute -- $connection {
+        DROP TABLE IF EXISTS CommandHistory;
+      }
+    } finally {
+      eagle_closeDatabase
+    }
+  }
+
+  proc eagle_addCommandToDatabase {
+          fileName result startLineIndex stopLineIndex } {
+    try {
+      upvar 1 connection connection
+
+      set opened [eagle_maybeOpenDatabase $fileName false]
+
+      sql execute -- $connection {
+        CREATE TABLE IF NOT EXISTS CommandHistory(
+          Sequence INTEGER NOT NULL,
+          Lines TEXT NOT NULL,
+          StartLine INTEGER NOT NULL,
+          StopLine INTEGER NOT NULL
+        );
+      }
+
+      sql execute -- $connection {
+        INSERT INTO CommandHistory (
+          Sequence, Lines, StartLine, StopLine
+        ) VALUES (
+          (SELECT COALESCE(MAX(Sequence), 0) + 1 FROM CommandHistory),
+          ?, ?, ?
+        );
+      } [list param1 String $result] \
+        [list param2 Int64 $startLineIndex] \
+        [list param3 Int64 $stopLineIndex]
+    } finally {
+      if {[info exist opened] && $opened} then {
+        eagle_closeDatabase
+      }
+    }
+  }
+
+  proc eagle_getSearchCommandsSql { mode {limit ""} {quiet false} } {
+    if {[string is integer -strict $limit] && $limit > 0} then {
+      set limitSql [appendArgs "LIMIT " $limit]
+    } else {
+      set limitSql ""
+    }
+
+    switch -exact -- $mode {
+      exact -
+      "" {
+        return [subst -nocommands -nobackslashes {
+            SELECT Lines FROM CommandHistory WHERE Lines = ?
+          ORDER BY Sequence DESC ${limitSql};
+        }]
+      }
+      glob {
+        return [subst -nocommands -nobackslashes {
+            SELECT Lines FROM CommandHistory WHERE Lines GLOB ?
+          ORDER BY Sequence DESC ${limitSql};
+        }]
+      }
+      regexp {
+        return [subst -nocommands -nobackslashes {
+            SELECT Lines FROM CommandHistory WHERE Lines REGEXP ?
+          ORDER BY Sequence DESC ${limitSql};
+        }]
+      }
+      default {
+        if {!$quiet} then {
+          error [appendArgs "bad search mode: " $mode]
+        }
+
+        return ""
+      }
+    }
+  }
+
+  proc eagle_maybeAutoWildcard { search mode autoWildcard } {
+    if {$autoWildcard} then {
+      if {$mode eq "glob"} then {
+        return [appendArgs * $search *]
+      } elseif {$mode eq "regexp"} then {
+        return [appendArgs .* $search .*]
+      }
+    }
+
+    return $search
+  }
+
+  proc eagle_searchCommandsDatabase {
+          fileName mode autoWildcard noCase searches {limit ""}
+          {quiet false} } {
+    try {
+      set results [list]
+      set sql [eagle_getSearchCommandsSql $mode $limit $quiet]
+
+      if {[string length $sql] > 0} then {
+        eagle_openDatabase $fileName
+
+        sql execute -- $connection [string map [list \
+            %noCase% $noCase] {PRAGMA case_sensitive_like = %noCase%;}]
+
+        foreach search $searches {
+          set search [eagle_maybeAutoWildcard \
+              $search $mode $autoWildcard]
+
+          set dataReader [sql execute \
+              -alias -execute reader -format dataReader -- \
+              $connection $sql [list param1 String $search]]
+
+          while {[$dataReader Read]} {
+            lappend results [$dataReader GetString 0]
+          }
+
+          unset -nocomplain dataReader
+        }
+      }
+
+      return $results
+    } finally {
+      eagle_closeDatabase
+    }
+  }
+
+  proc eagle_doesLineMatchAny { line searches mode autoWildcard noCase } {
+    foreach search $searches {
+      set search [eagle_maybeAutoWildcard \
+          $search $mode $autoWildcard]
+
+      if {$mode eq "regexp"} then {
+        if {$noCase} then {
+          if {[regexp -nocase -- $search $line]} then {
+            return true
+          }
+        } else {
+          if {[regexp -- $search $line]} then {
+            return true
+          }
+        }
+      } elseif {$mode eq "glob"} then {
+        if {$noCase} then {
+          if {[string match -nocase $search $line]} then {
+            return true
+          }
+        } else {
+          if {[string match $search $line]} then {
+            return true
+          }
+        }
+      } elseif {$mode in [list "" exact]} then {
+        if {$noCase} then {
+          if {[string equal -nocase $search $line]} then {
+            return true
+          }
+        } else {
+          if {$line eq $search} then {
+            return true
+          }
+        }
+      } else {
+        #
+        # BUGBUG: Unsupported match mode, maybe raise error?
+        #
+        break
+      }
+    }
+
+    return false
+  }
+
+  proc eagle_doesLineMatchAll { line searches mode autoWildcard noCase } {
+    foreach search $searches {
+      set search [eagle_maybeAutoWildcard \
+          $search $mode $autoWildcard]
+
+      if {$mode eq "regexp"} then {
+        if {$noCase} then {
+          if {![regexp -nocase -- $search $line]} then {
+            return false
+          }
+        } else {
+          if {![regexp -- $search $line]} then {
+            return false
+          }
+        }
+      } elseif {$mode eq "glob"} then {
+        if {$noCase} then {
+          if {![string match -nocase $search $line]} then {
+            return false
+          }
+        } else {
+          if {![string match $search $line]} then {
+            return false
+          }
+        }
+      } elseif {$mode in [list "" exact]} then {
+        if {$noCase} then {
+          if {![string equal -nocase $search $line]} then {
+            return false
+          }
+        } else {
+          if {$line ne $search} then {
+            return false
+          }
+        }
+      } else {
+        #
+        # BUGBUG: Unsupported match mode, maybe raise error?
+        #
+        break
+      }
+    }
+
+    return [expr {[llength $searches] > 0}]
+  }
+
+  proc eagle_normalizeToLf { data {quiet false} } {
+    set result [string map [list \r\n \n] $data]
+
+    if {[set index [string first \r $result]] != -1} then {
+      if {$quiet} then {
+        set result [string map [list \r \n] $result]
+      } else {
+        error [appendArgs \
+            "stray carriage return found at index: " $index]
+      }
+    }
+
+    return $result
+  }
+
+  proc eagle_normalizeToCrLf { data {quiet false} } {
+    if {[set index [string first \r $data]] != -1} then {
+      if {!$quiet} then {
+        error [appendArgs \
+            "stray carriage return found at index: " $index]
+      }
+    }
+
+    if {$index != -1} then {
+      set result [string map [list \n \r\n \r \r\n] $data]
+    } else {
+      set result [string map [list \n \r\n] $data]
+    }
+
+    return $result
+  }
+
+  proc eagle_maximumLengthForAdd {} {
+    upvar #0 eagle_debugger debugger
+
+    if {[info exists debugger(MaximumLengthForAdd)]} then {
+      return $debugger(MaximumLengthForAdd)
+    }
+
+    if {[info exists ::env(MaximumLengthForAdd)]} then {
+      return $::env(MaximumLengthForAdd)
+    }
+
+    return 0
+  }
+
+  proc eagle_maximumLengthForSearch {} {
+    upvar #0 eagle_debugger debugger
+
+    if {[info exists debugger(MaximumLengthForSearch)]} then {
+      return $debugger(MaximumLengthForSearch)
+    }
+
+    if {[info exists ::env(MaximumLengthForSearch)]} then {
+      return $::env(MaximumLengthForSearch)
+    }
+
+    return 0
+  }
+
+  proc eagle_searchCommandsFrom { {fileName ""} {mode ""} {limit ""} args } {
+    try {
+      upvar #0 eagle_debugger debugger
+
+      set databaseFileName \
+          [eagle_getCmdsDatabaseFileName $fileName true]
+
+      if {[string length $databaseFileName] && \
+          [file exists $databaseFileName] && \
+          [file size $databaseFileName] > 0} then {
+        set haveDatabase true
+      } else {
+        set haveDatabase false
+      }
+
+      set searches $args
+      set autoWildcard false
+      set noCase false
+      set matchAll false
+      set useDatabase false
+      set importOnly false
+      set quiet false
+      set verbose false
+
+      eagle_checkSearchCommandsMode \
+          mode autoWildcard noCase matchAll useDatabase importOnly \
+          quiet verbose
+
+      if {$haveDatabase && $useDatabase && !$importOnly} then {
+        return [eagle_searchCommandsDatabase \
+            $databaseFileName $mode $autoWildcard $noCase $searches \
+            $limit $quiet]
+      }
+
+      set results [list]
+
+      if {[string length $fileName] > 0 && \
+          [file exists $fileName] && \
+          [file isfile $fileName]} then {
+        set data [readSharedFile $fileName]
+        set data [eagle_normalizeToLf $data $quiet]
+      }
+
+      set lines [list]
+
+      if {[info exists data]} then {
+        set fileLines [split $data \n]
+
+        if {$verbose} then {
+          host result Continue [appendArgs \
+              "Searching through " [llength $fileLines] \
+              " lines from text file \"" $fileName "\"...\n"]
+        }
+
+        eval lappend lines $fileLines
+      }
+
+      if {[info exists debugger(interactiveCommands)]} then {
+        set memoryLines $debugger(interactiveCommands)
+
+        if {$verbose} then {
+          host result Continue [appendArgs \
+              "Searching through " [llength $memoryLines] \
+              " commands from memory...\n"]
+        }
+
+        eval lappend lines $memoryLines
+      }
+
+      if {$useDatabase && $importOnly} then {
+        eagle_openDatabase $databaseFileName false
+        set transaction [sql transaction begin $connection]
+      }
+
+      set lineCount [llength $lines]
+
+      for {set lineIndex 0} {$lineIndex < $lineCount} {incr lineIndex} {
+        set line [lindex $lines $lineIndex]
+        set trimLine [string trim $line]
+        set trimLength [string length $trimLine]
+
+        if {$trimLength == 0} then {continue}
+        if {[string index $trimLine 0] eq "#"} then {continue}
+
+        if {$useDatabase} then {
+          set match false
+        } else {
+          if {$matchAll} then {
+            set match [eagle_doesLineMatchAll \
+                $line $searches $mode $autoWildcard $noCase]
+          } else {
+            set match [eagle_doesLineMatchAny \
+                $line $searches $mode $autoWildcard $noCase]
+          }
+        }
+
+        if {$useDatabase || $match} then {
+          set startLineIndex $lineIndex
+          set stopLineIndex $lineIndex
+          set complete false
+
+          for {} {$lineIndex < $lineCount} {incr lineIndex} {
+            set result [join \
+                [lrange $lines $startLineIndex $lineIndex] \n]
+
+            if {[info complete $result]} then {
+              set stopLineIndex $lineIndex
+              set complete true; break
+            }
+          }
+
+          if {$complete} then {
+            if {![eagle_isHistoryCommand $result]} then {
+              set maximumLength [eagle_maximumLengthForAdd]
+              set length [string length $result]
+
+              if {$maximumLength <= 0 || $length <= $maximumLength} then {
+                if {$useDatabase} then {
+                  eagle_addCommandToDatabase $databaseFileName \
+                      $result $startLineIndex $stopLineIndex
+
+                  if {$importOnly} then {
+                    host result Continue .
+                  }
+                } else {
+                  lappend results $result
+                }
+              } else {
+                if {!$quiet} then {
+                  error [appendArgs "single command too long: " $length]
+                }
+              }
+            }
+          } else {
+            set lineIndex $startLineIndex
+          }
+        }
+      }
+
+      if {$useDatabase && $importOnly} then {
+        sql transaction commit $transaction
+        host result Continue \n
+      }
+
+      return $results
+    } finally {
+      unset -nocomplain -zerostring -purge -- \
+          databaseFileName haveDatabase searches autoWildcard noCase \
+          matchAll useDatabase importOnly quiet verbose results data \
+          lines memoryLines fileLines lineCount lineIndex line \
+          trimLine trimLength match startLineIndex stopLineIndex \
+          complete maximumLength length result
+    }
+  }
+
+  proc eagle_haveStringTransformCallbackBridge {} {
+    if {[catch {package require Eagle.Test}]} then {
+      return false
+    }
+
+    if {![isStableEagleRelease 50 true]} then {
+      return false
+    }
+
+    foreach option [list \
+        TEST ISOLATED_INTERPRETERS ISOLATED_PLUGINS] {
+      if {[lsearch -exact -- \
+          $::eagle_platform(compileOptions) $option] == -1} then {
+        return false
+      }
+    }
+
+    return true
+  }
+
+  proc eagle_useStringTransformCallbackBridge {} {
+    #
+    # HACK: If the interactive loop was entered from another AppDomain,
+    #       this should use the StringTransformCallbackBridge class to
+    #       avoid any cross-domain marshalling errors.
+    #
+    set marshalTypeName \
+        Eagle._Tests.Default+ScriptStringTransformCallback
+
+    set bridgeTypeName StringTransformCallbackBridge; # ECP.*
+
+    set delegateTypeName \
+        Eagle._Components.Public.Delegates.StringTransformCallback
+
+    set callback [object create -alias \
+        -objectflags +NoDispose -marshalflags +DynamicCallback \
+        $marshalTypeName eagle_interactiveCommandCallback]
+
+    set error null
+
+    set bridge [object invoke -alias \
+        $bridgeTypeName Create $callback error]
+
+    if {![isNonNullObjectHandle $bridge]} then {
+      error [getStringFromObjectHandle $error]
+    }
+
+    set delegate [object invoke Delegate CreateDelegate \
+        $delegateTypeName $bridge StringTransformCallback]
+
+    object invoke Interpreter.GetActive \
+        InteractiveCommandCallback $delegate
+  }
+
+  proc eagle_enableInteractiveCommandCallback { enable {quiet false} } {
+    #
+    # NOTE: Set or unset the interactive command callback (delegate)
+    #       for the current interpreter, based on the "enable" flag.
+    #
+    if {$enable} then {
+      if {![info exists ::no(NoStringTransformCallbackBridge)] && \
+          ![info exists ::env(NoStringTransformCallbackBridge)] && \
+          [eagle_haveStringTransformCallbackBridge]} then {
+        eagle_useStringTransformCallbackBridge
+
+        if {!$quiet} then {
+          host result Continue \
+              "Interactive command callback set with bridge.\n"
+        }
+      } else {
+        object invoke -marshalflags +DynamicCallback \
+            Interpreter.GetActive InteractiveCommandCallback \
+            eagle_interactiveCommandCallback
+
+        if {!$quiet} then {
+          host result Continue \
+              "Interactive command callback set without bridge.\n"
+        }
+      }
+
+      object callbackflags eagle_interactiveCommandCallback \
+          "-Complain AddReference +ThrowOnError"
+    } else {
+      object invoke Interpreter.GetActive \
+          InteractiveCommandCallback null
+
+      if {!$quiet} then {
+        host result Continue "Interactive command callback unset.\n"
+      }
+    }
+  }
+
+  proc eagle_evaluateCommandFrom { args } {
+    # <help>
+    # Attempts to find and possibly evaluate a command from the interactive
+    # command history.  If the number of arguments is zero, nothing is done.
+    # If the number of arguments is exactly one, that is the search term to
+    # find using default matching modes (e.g. "glob noCase").  If the number
+    # of arguments is two or greater, they will be interpreted as follows:
+    #
+    #     &lt;option1&gt; &lt;value1&gt; ... &lt;optionN&gt; &lt;valueN&gt;
+    #
+    # Here are some trivial examples (i.e. single argument):
+    #
+    #     %commandName% set*
+    #     %commandName% "set *"
+    #
+    # Here are some non-trivial examples (i.e. option pairs):
+    #
+    #     %commandName% verbose true whatIf true index end-1 search organiz*
+    #     %commandName% verbose true mode regexp index end-1 search organiz.*
+    #
+    # Each name must be one of: "any", "mode", "index", "limit", "noCase",
+    # "matchAll", "useDatabase", "importOnly", "quiet", "verbose", "whatIf",
+    # or "search".  The values for "any", "noCase", "matchAll", "useDatabase",
+    # "importOnly", "quiet", "verbose", and "whatIf" options must be a (valid)
+    # boolean.  For the "whatIf" name only, it may have a value of "2", "3",
+    # or "4", all of which have special meanings:
+    #
+    #     1. If "whatIf" value is "2", the staged command will be evaluated.
+    #     2. If "whatIf" value is "3", the staged command will be reset.
+    #     3. If "whatIf" value is "4", bulk import text file into database.
+    #
+    # The value for "mode" must be an empty string -OR- exactly one of the
+    # following: "exact", "glob", or "regexp".  The value of "limit" must be a
+    # valid integer.  The value of the "index" option must be a valid integer
+    # -OR- the string "end" -OR- a string of the form "end-&lt;integer&gt;",
+    # where the "&lt;integer&gt;" portion must be greater than or equal to
+    # zero and less than the total number of search matches.  The value of the
+    # "search" options are arbitrary patterns to match candidate historical
+    # interactive commands against.  If the "whatIf" option value is non-zero,
+    # nothing is evaluated; instead, the matching command, if any, is simply
+    # returned.
+    #
+    # The default values for the supported options are as follows:
+    #
+    #     "any" ==> "true"
+    #     "mode" ==> "glob"
+    #     "index" ==> "end"
+    #     "limit" ==> "%limit%"
+    #     "autoWildcard" ==> "true"
+    #     "noCase" ==> "true"
+    #     "matchAll" ==> "%matchAll%"
+    #     "useDatabase" ==> "%useDatabase%"
+    #     "importOnly" ==> "%importOnly%"
+    #     "quiet" ==> "false"
+    #     "verbose" ==> "false"
+    #     "whatIf" ==> "%whatIf%"
+    # </help>
+
+    set baseCommandName eagle_evaluateCommandFrom
+    set commandName [lindex [info level [info level]] 0]
+    set any true; # TODO: What is this formally supposed to do?
+    set mode [list glob]
+    set index %index%
+    set limit %limit%
+    set autoWildcard true
+    set noCase true
+    set matchAll %matchAll%
+    set useDatabase %useDatabase%
+    set importOnly %importOnly%
+    set quiet false
+    set verbose false
+    set whatIf %whatIf%
+    set searches [list]
+
+    if {$limit eq [appendArgs % limit %] && \
+        $commandName eq $baseCommandName} then {
+      set limit 1
+    }
+
+    if {$matchAll eq [appendArgs % matchAll %] && \
+        $commandName eq $baseCommandName} then {
+      set matchAll false
+    }
+
+    if {$useDatabase eq [appendArgs % useDatabase %] && \
+        $commandName eq $baseCommandName} then {
+      set useDatabase false
+    }
+
+    if {$importOnly eq [appendArgs % importOnly %] && \
+        $commandName eq "eagle_evaluateCommandFrom"} then {
+      set importOnly false
+    }
+
+    if {$whatIf eq [appendArgs % whatIf %] && \
+        $commandName eq $baseCommandName} then {
+      set whatIf false
+    }
+
+    if {$whatIf == 3} then {
+      return [eagle_resetStagedCommand]
+    } elseif {$whatIf == 2} then {
+      return [uplevel 1 eagle_evaluateStagedCommand]
+    }
+
+    set length [llength $args]
+
+    if {$whatIf != 4 && $length == 0} then {; # NOTE: Bulk import?
+      return
+    }
+
+    if {$length > 1} then {
+      if {$length % 2} then {
+        if {!$quiet} then {
+          error [appendArgs \
+              "wrong # args: should be \"" \
+              [lindex [info level [info level]] 0] \
+              " search -OR- name value ?name value ...?\""]
+        }
+      } else {
+        eval eagle_processSearchArguments $args
+      }
+    } elseif {$length > 0} then {
+      lappend searches [lindex $args 0]
+    }
+
+    if {$autoWildcard} then {lappend mode autoWildcard}
+    if {$noCase} then {lappend mode noCase}
+    if {$matchAll} then {lappend mode matchAll}
+    if {$useDatabase} then {lappend mode useDatabase}
+    if {$importOnly} then {lappend mode importOnly}
+    if {$quiet} then {lappend mode quiet}
+    if {$verbose} then {lappend mode verbose}
+
+    set fileName [eagle_getCmdsFileName $quiet $verbose]
+
+    if {[string length $fileName] == 0} then {
+      error "historical interactive commands unavailable"
+    }
+
+    set length [llength $searches]
+
+    if {$whatIf == 4 || $length > 0} then {; # NOTE: Bulk import?
+      set matches [eval eagle_searchCommandsFrom \
+          [list $fileName] [list $mode] [list $limit] $searches]
+    } else {
+      set matches [list]
+    }
+
+    set length [llength $matches]
+
+    if {$verbose} then {
+      host result Continue [appendArgs \
+          "Matched " $length \
+          " historical interactive commands.\n"]
+
+      if {$limit > 0} then {
+        host result Continue [appendArgs \
+            "Limiting to " $limit \
+            " historical interactive commands...\n"]
+      }
+    }
+
+    if {$length > 0} then {
+      if {$any || $limit <= 0 || $length <= $limit} then {
+        if {[regexp -skip 1 -- {^end-(\d+)$} $index offset]} then {
+          set index [expr {$length - 1 - $offset}]
+        } elseif {$index eq "end"} then {
+          set index [expr {$length - 1}]
+        }
+
+        if {$verbose} then {
+          #
+          # HACK: Using a one-based index here is not 100%
+          #       accurate; however, it is easier to read.
+          #
+          host result Continue [appendArgs \
+              "Effective index is " [expr {$index + 1}] \
+              " out of " $length " matches.\n"]
+        }
+
+        #
+        # HACK: Do not return match(es) that exceed the configured
+        #       maximum (string) length, if any.
+        #
+        set maximumLength [eagle_maximumLengthForSearch]
+
+        if {$index >= 0 && $index < $length} then {
+          set match [lindex $matches $index]
+          set length [string length $match]
+
+          if {$maximumLength <= 0 || $length <= $maximumLength} then {
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Processing match (" [expr {$index + 1}] " out of " \
+                  $length "): " $match \n]
+            }
+
+            eagle_setStagedCommand $match
+
+            if {$whatIf} then {
+              return $match
+            } else {
+              return [uplevel 1 $match]
+            }
+          } else {
+            if {!$quiet} then {
+              error [appendArgs "single match too long: " $length]
+            }
+          }
+        } elseif {$index == -1} then {
+          #
+          # HACK: Return all matches when index is exactly negative one.
+          #
+          set match [join $matches \n\n\n]
+          set length [string length $match]
+
+          if {$maximumLength <= 0 || $length <= $maximumLength} then {
+            if {$verbose} then {
+              host result Continue [appendArgs \
+                  "Processing matches (" [llength $matches] "): " \
+                  $match \n]
+            }
+
+            return $match
+          } else {
+            if {!$quiet} then {
+              error [appendArgs "multiple matches too long: " $length]
+            }
+          }
+        } else {
+          if {!$quiet} then {
+            error [appendArgs \
+                "not enough historical interactive commands matched: " \
+                [lrange [info level [info level]] 1 end]]
+          }
+        }
+      } else {
+        if {!$quiet} then {
+          error [appendArgs \
+              "too many historical interactive commands matched: " \
+              [lrange [info level [info level]] 1 end]]
+        }
+      }
+    } else {
+      if {$whatIf != 4} then {; # NOTE: Bulk import?
+        if {!$quiet} then {
+          error [appendArgs \
+              "no historical interactive commands matched: " \
+              [lrange [info level [info level]] 1 end]]
+        }
+      }
+    }
+  }
+
+  proc #record { enable } {
+    # <help>
+    # Enables or disables the recording of all commands entered via the
+    # interpreter host within the interactive loop.  If the "exit" or "#exit"
+    # command is detected when there are more than zero of these recorded
+    # commands, a prompt will ask if the recorded commands should be saved.
+    # When saving, the recorded commands will always be appended to a script
+    # file named "cmds.eagle" in the home directory of the current user (i.e.
+    # with the path "~/cmds.eagle") and/or in a SQLite database file named
+    # "cmds.eagle.db" in the home directory of the current user (i.e. with
+    # the path "~/cmds.eagle.db").
+    # </help>
+
+    if {[lsearch -exact -- \
+        $::eagle_platform(compileOptions) EMIT] == -1} then {
+      error "library missing EMIT compile-option"
+    }
+
+    if {$enable} then {
+      proc eagle_yesOrNoOrCancel { text caption default } {
+        if {[isWindows] && [lsearch -exact -- \
+            $::eagle_platform(compileOptions) WINFORMS] != -1} then {
+          set result [object invoke -flags +NonPublic -parametertypes \
+              [list String String System.Windows.Forms.DialogResult] \
+              Eagle._Components.Private.FormOps YesOrNoOrCancel \
+              $text $caption $default]
+        } else {
+          if {[string length $caption] > 0} then {
+            set savedTitle [host title]
+            host title $caption
+          }
+
+          try {
+            set yes y; set no n; set cancel c
+
+            if {$default eq "Yes"} then {set yes Y}
+            if {$default eq "No"} then {set no N}
+            if {$default eq "Cancel"} then {set cancel C}
+
+            host result Return $text
+
+            host result Break [appendArgs \
+                "\nPlease enter: (" $yes ")es, (" $no ")o, (" $cancel \
+                ")ancel\n"]
+
+            if {[gets stdin result] >= 0} then {
+              if {[regexp -nocase -- {^Y(?:e(?:s)?)?$} $result]} then {
+                set prefix Entered; set result Yes
+              } elseif {[regexp -nocase -- {^N(?:o)?$} $result]} then {
+                set prefix Entered; set result No
+              } elseif {[regexp -nocase -- \
+                  {^C(?:a(?:n(?:c(?:e(?:l)?)?)?)?)?$} $result]} then {
+                set prefix Entered; set result Cancel
+              } else {
+                set prefix Defaulted; set result $default
+              }
+
+              host result Ok [appendArgs $prefix " " $result \n\n]
+            } else {
+              set result $default
+            }
+          } finally {
+            if {[info exists savedTitle]} then {
+              host title $savedTitle
+              unset savedTitle
+            }
+          }
+        }
+
+        return $result
+      }
+
+      proc eagle_maybeYesOrNoOrCancel {
+              yesVarName noVarName cancelVarName text caption default } {
+        upvar #0 eagle_debugger debugger
+
+        if {[info exists ::env($yesVarName)] && \
+            $::env($yesVarName)} then {
+          return Yes
+        }
+
+        if {[info exists debugger($yesVarName)] && \
+            $debugger($yesVarName)} then {
+          return Yes
+        }
+
+        if {[info exists ::env($noVarName)] && \
+            $::env($noVarName)} then {
+          return No
+        }
+
+        if {[info exists debugger($noVarName)] && \
+            $debugger($noVarName)} then {
+          return No
+        }
+
+        if {[info exists ::env($cancelVarName)] && \
+            $::env($cancelVarName)} then {
+          return Cancel
+        }
+
+        if {[info exists debugger($cancelVarName)] && \
+            $debugger($cancelVarName)} then {
+          return Cancel
+        }
+
+        return [eagle_yesOrNoOrCancel $text $caption $default]
+      }
+
+      proc eagle_interactiveCommandCallback { text } {
+        #
+        # NOTE: This callback procedure is not designed to be used in "safe"
+        #       interpreters.
+        #
+        if {[interp issafe]} then {
+          return $text
+        }
+
+        #
+        # NOTE: This callback procedure cannot really work reliably when the
+        #       global call frame has been changed via [scope global].
+        #
+        if {[string length [scope global]] > 0} then {
+          return $text
+        }
+
+        #
+        # NOTE: This callback procedure cannot be used if the "null" opaque
+        #       object handle is missing.
+        #
+        if {![isObjectHandle null]} then {
+          return $text
+        }
+
+        #
+        # NOTE: Use the reserved Eagle "debugger" global variable to store
+        #       the recorded commands.
+        #
+        upvar #0 eagle_debugger debugger
+        set element interactiveCommands
+
+        #
+        # BUGFIX: If the value of the text argument is actually an opaque
+        #         object handle, attempt to verify that it has a non-zero
+        #         reference count; otherwise, passing the value may cause
+        #         the underlying opaque object handle to be removed from
+        #         the interpreter upon exiting any procedure it is passed
+        #         to (e.g. isNonNullObjectHandle, etc).
+        #
+        #         After the try / finally block (below) the opaque object
+        #         handle will be converted to its underlying string value
+        #         if necessary; therefore, its lock can be removed.
+        #
+        #         This is further complicated by the fact that reference
+        #         counting is not necessarily coupled to procedure frame
+        #         deletion.
+        #
+        #         To actually have the opaque object handles cleaned up
+        #         when we are done with them, we need to add a temporary
+        #         reference, lock the opaque object handle, pass it to
+        #         whichever procedures we want, unlock the opaque object
+        #         handle, and finally remove the temporary reference,
+        #         which may (or may not) cause the opaque object handle
+        #         to be removed from the interpreter.
+        #
+        unset -nocomplain savedText savedFlags
+
+        if {[catch {
+          object referencecount $text
+        } referenceCount] == 0 && $referenceCount == 0} then {
+          set savedText $text; set savedFlags [object flags $savedText]
+          object addreference $savedText; object flags $savedText +Locked
+        }
+
+        try {
+          #
+          # NOTE: If the passed in argument is an opaque object handle,
+          #       get the underlying string now.
+          #
+          if {[isNonNullObjectHandle $text]} then {
+            set text [getStringFromObjectHandle $text]
+          }
+        } finally {
+          if {[info exists savedText] && [info exists savedFlags]} then {
+            catch {
+              object flags $savedText $savedFlags
+              object removereference $savedText
+            }
+
+            unset -nocomplain savedText savedFlags
+          }
+        }
+
+        #
+        # NOTE: Check if this command actually contains anything (i.e. it
+        #       is not just a blank line).
+        #
+        set trimText [string trim $text]
+        set trimLength [string length $trimText]
+
+        if {$trimLength > 0} then {
+          #
+          # NOTE: Figure out exact fully qualified file name now, just in
+          #       case the user wants to save.  This file name will now be
+          #       shown in the user prompt, prior to an actual choice being
+          #       made.
+          #
+          set fileName [eagle_getCmdsFileName \
+              false false false fileType seqNum]
+
+          #
+          # NOTE: Does it seem the user is exiting the interactive loop?
+          #
+          if {[string tolower $trimText] in [list exit #exit] && ([catch {
+            object invoke \
+                -flags +NonPublic Interpreter.GetActive IsKioskLock
+          } kiosk] || !$kiosk)} then {
+            #
+            # NOTE: Are there any previously recorded commands?  It should
+            #       also be noted here that we do not bother saving the
+            #       exit command itself.
+            #
+            if {[info exists debugger($element)] && \
+                [set count [llength $debugger($element)]] > 0} then {
+              if {[string length $fileName] > 0} then {
+                #
+                # NOTE: Prompt the interactive user to save their recorded
+                #       commands.  There is no need to ask for a file name
+                #       because they are always appended to the same file.
+                #
+                set noun [expr {$count == 1 ? "command" : "commands"}]
+
+                if {[set answer [eagle_maybeYesOrNoOrCancel \
+                    autoSaveCmdsFile autoDiscardCmdsFile autoCancelCmdsFile \
+                    [appendArgs "Found " $count " unsaved interactive " \
+                    $noun ".\n\n" $fileName "\n\nSave to the preceding " \
+                    $fileType " named file now?"] [info engine Name] No]] \
+                    eq "Yes"} then {
+                  #
+                  # NOTE: Join all commands with line terminators; also,
+                  #       prepend a small header.
+                  #
+                  set header [appendArgs \
+                      "# " [clock format [clock seconds] -iso] " - " \
+                      [info context] " - " $seqNum]
+
+                  set data [appendArgs \
+                      \n\n $header \n [join $debugger($element) \n] \n]
+
+                  #
+                  # NOTE: Save recorded commands to a file in the MS-DOS
+                  #       format.
+                  #
+                  appendSharedFile \
+                      $fileName [eagle_normalizeToCrLf $data]
+
+                  #
+                  # NOTE: Remove all the recorded commands we just saved
+                  #       from memory as they are now on disk.
+                  #
+                  unset debugger($element)
+
+                  #
+                  # NOTE: Report some result information to the user.
+                  #
+                  host result Ok [appendArgs \
+                      "Appended " $count " recorded " $noun " to \"" \
+                      $fileName \".\n]
+                } elseif {$answer eq "No"} then {
+                  #
+                  # NOTE: Remove all the recorded commands from memory as
+                  #       the interactive user has chosen to discard them
+                  #       instead of saving them to disk.
+                  #
+                  unset debugger($element)
+                } elseif {$answer eq "Cancel"} then {
+                  #
+                  # NOTE: Return an empty string, this will prevent the
+                  #       originally entered command from being executed,
+                  #       thus enabling the user to cancel.
+                  #
+                  return ""
+                }
+              }
+            }
+          } else {
+            #
+            # HACK: Do not add command to the history if it is actually a
+            #       "history management" command.
+            #
+            if {![eagle_isHistoryCommand $trimText]} then {
+              #
+              # HACK: Do not add command if it exceeds the configured length
+              #       limit(s), if any.
+              #
+              set maximumLength [eagle_maximumLengthForAdd]
+
+              if {$maximumLength <= 0 || $trimLength <= $maximumLength} then {
+                #
+                # HACK: If the command deals with history manipulation,
+                #       then DO NOT add it to the history, as that does
+                #       not (normally?) make much sense.
+                #
+                if {![regexp -- {^\\?#{1,2}[!@_]{1,2}\s} $trimText]} then {
+                  #
+                  # NOTE: Record the command verbatim, minus any leading or
+                  #       trailing whitespace; later, it may be saved to the
+                  #       commands file.
+                  #
+                  if {![info exists ::no(NoAddCommandToTextFile)] && \
+                      ![info exists ::env(NoAddCommandToTextFile)]} then {
+                    lappend debugger($element) $trimText
+                  }
+
+                  #
+                  # NOTE: Unless forbidden from doing so, also keep track of
+                  #       the command in the history database file.
+                  #
+                  if {![info exists ::no(NoAddCommandToDatabaseFile)] && \
+                      ![info exists ::env(NoAddCommandToDatabaseFile)]} then {
+                    #
+                    # BUGFIX: Do not allow an (SQLite) error to be raised at
+                    #         this point.
+                    #
+                    catch {
+                      set databaseFileName \
+                          [eagle_getCmdsDatabaseFileName $fileName true]
+
+                      try {
+                        eagle_openDatabase $databaseFileName false
+
+                        eagle_addCommandToDatabase \
+                            $databaseFileName $trimText 0 0
+                      } finally {
+                        eagle_closeDatabase
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        #
+        # NOTE: Return the original command verbatim.
+        #
+        return $text
+      }
+
+      #
+      # NOTE: Remove the associated callback from the current interpreter.
+      #
+      if {[llength \
+          [info callbacks eagle_interactiveCommandCallback]] > 0} then {
+        catch {object removecallback eagle_interactiveCommandCallback}
+      }
+
+      object invoke -marshalflags +DynamicCallback \
+          Interpreter.GetActive InteractiveCommandCallback null
+    } else {
+      #
+      # NOTE: Unless forbidden from doing so, attempt to prompt the user to
+      #       save the command history now.
+      #
+      if {![info exists ::no(NoRecordPrompt)] && \
+          ![info exists ::env(NoRecordPrompt)] && [catch {
+        #
+        # NOTE: Attempt to force the command history to be saved now.  This
+        #       may be canceled.  In that case, just stop processing.
+        #
+        eagle_interactiveCommandCallback exit
+      } result] == 0 && [string length $result] == 0} then {
+        return $result
+      }
+
+      #
+      # NOTE: Remove the helper procedure and its associated callback from
+      #       the current interpreter.
+      #
+      if {[llength \
+          [info callbacks eagle_interactiveCommandCallback]] > 0} then {
+        catch {object removecallback eagle_interactiveCommandCallback}
+      }
+
+      if {[llength \
+          [info commands eagle_interactiveCommandCallback]] > 0} then {
+        catch {rename eagle_interactiveCommandCallback ""}
+      }
+    }
+
+    #
+    # HACK: Disable interactive script timeouts by default.
+    #
+    if {![info exists ::no(disableInteractiveTimeout)]} then {
+      object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+          Interpreter.GetActive interactiveLoopFlags +NoTimeout
+
+      host result Ok [appendArgs \
+          "Interactive loop flags are now: " [object invoke -flags \
+          +NonPublic Interpreter.GetActive interactiveLoopFlags] \
+          \n]
+    }
+
+    eagle_enableInteractiveCommandCallback $enable
+
+    if {![info exists ::no(NoAddCommandToTextFile)] && \
+        ![info exists ::env(NoAddCommandToTextFile)]} then {
+      host result Ok [appendArgs \
+          "Recording of interactive commands to text file \"" \
+          [eagle_getCmdsFileName] "\" " \
+          [expr {$enable ? "enabled" : "disabled"}] .\n]
+    }
+
+    if {![info exists ::no(NoAddCommandToDatabaseFile)] && \
+        ![info exists ::env(NoAddCommandToDatabaseFile)]} then {
+      host result Ok [appendArgs \
+          "Recording of interactive commands to database file \"" \
+          [eagle_getCmdsDatabaseFileName [eagle_getCmdsFileName] true] \
+          "\" " [expr {$enable ? "enabled" : "disabled"}] .\n]
+    }
+
+    return ""
+  }
+
+  #
+  # NOTE: Setup the aliases used to search for and/or evaluate
+  #       commands from the interactive command history.
+  #
+  if {![info exists ::no(setupCommandSearchProcedures)]} then {
+    eagle_setupCommandSearchProcedures
+  }
+
+  #
+  # NOTE: Provide the history package to the interpreter.
+  #
+  package provide Eagle.History \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+

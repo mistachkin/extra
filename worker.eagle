@@ -1,0 +1,135 @@
+###############################################################################
+#
+# worker.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Worker Startup Script (Asynchronous)
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+if {1} then {
+  apply [list [list] {
+    #
+    # HACK: This script is being evaluated on a thread from the thread
+    #       pool.  Hence, we will wait synchronously for the (global)
+    #       Tcl / Eagle shell interactivity "indicator" variable (i.e.
+    #       "::tcl_interactive") to be created or changed via the main
+    #       interpreter thread (roughly) upon entering the interactive
+    #       loop method.
+    #
+    if {![info exists ::no(NoWorkerThread)] && \
+        ![info exists ::env(NoWorkerThread)]} then {; # NOTE: Forbidden?
+      if {[info tid] != [info ptid]} then {; # NOTE: Do NOT block main thread.
+        set delay 1000; after $delay; set mode unknown; # HACK: Slow.
+
+        try {
+          set varName ::tcl_interactive; set started 0; set stopped 0
+
+          while {true} {
+            if {[info exists $varName] && \
+                [set varValue [set $varName]]} then {
+              if {[hasRuntimeOption verboseWorker]} then {
+                debug output [appendArgs \
+                    "Skipped waiting for variable \"" $varName \
+                    "\" on thread " [info tid] ...]
+              }
+
+              break
+            } else {
+              if {[hasRuntimeOption verboseWorker]} then {
+                debug output [appendArgs \
+                    "Started waiting for variable \"" $varName \
+                    "\" on thread " [info tid] ...]
+              }
+            }
+
+            if {[catch {
+              set started [clock milliseconds]
+
+              try {
+                vwait -force -timeout [expr {$delay * 5}]  -- $varName
+              } finally {
+                set stopped [clock milliseconds]
+
+                set elapsed [expr {$stopped - $started}]
+
+                set noun [expr {
+                  $elapsed == 1 ? "millisecond" : "milliseconds"
+                }]
+              }
+            }] == 0} then {
+              if {[hasRuntimeOption verboseWorker]} then {
+                debug output [appendArgs \
+                    "Success waiting for variable \"" $varName \
+                    "\" for " $elapsed " " $noun " on thread " \
+                    [info tid] .]
+              }
+
+              break
+            } else {
+              if {[hasRuntimeOption verboseWorker]} then {
+                debug output [appendArgs \
+                    "Failure waiting for variable \"" $varName \
+                    "\" for " $elapsed " " $noun " on thread " \
+                    [info tid] ": " $result]
+              }
+
+              after $delay
+            }
+          }
+
+          #####################################################################
+          #                      BEGIN-FAIL-SAFE SECTION                      #
+          #####################################################################
+          #                                                                   #
+          # WARNING: Interpreters created with the "Worker\d" initialization  #
+          #          flags should ALWAYS get to this code.  If that is false, #
+          #          Eagle is broken.                                         #
+          #                                                                   #
+          #####################################################################
+
+          if {([info exists varValue] && $varValue) || \
+              ([info exists $varName] && [set varValue [set $varName]])} then {
+            #
+            # HACK: All the complex extra logic in this script is designed
+            #       to prevent superfluous messages from being emitted when
+            #       the shell is running in batch mode, in order to avoid
+            #       contaminating output channels for any callers that may
+            #       be capturing them.
+            #
+            host result Return "'Hello World' from the thread pool.\n"
+          }
+
+          #####################################################################
+          #                       END-FAIL-SAFE SECTION                       #
+          #####################################################################
+        } finally {
+          if {[info exists varValue]} then {
+            if {$varValue} then {
+              set mode interactive
+            } else {
+              set mode batch
+            }
+          } else {
+            set mode missing
+          }
+
+          if {[hasRuntimeOption verboseWorker]} then {
+            debug output [appendArgs \
+                "Shell appears to be running in " $mode " mode on thread " \
+                [info tid] .]
+          }
+
+          set ::eagle_debugger(worker) [clock seconds]; # INDICATOR ONLY
+        }
+      }
+    }
+  }]
+}

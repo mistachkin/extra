@@ -1,0 +1,2947 @@
+###############################################################################
+#
+# intExtCmds.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Interactive Extension Commands (Public)
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval :: {
+  proc #morecmds { enable {all false} {interpreter ""} } {
+    # <help>
+    # Adds or removes one or more sets of extra (e.g. test-only) commands,
+    # using the specified interpreter context.
+    # </help>
+
+    set cacheName [appendArgs \
+        $interpreter , [lindex [info level [info level]] 0] \
+        , [string is true -strict $all]]
+
+    if {$enable} then {
+      if {$all} then {
+        set ruleSetClientData \
+            [object create Eagle._Tests.Default+RuleSetClientData]
+
+        set tokens null
+        set errors null
+
+        set code [object invoke -alias \
+            Eagle._Tests.Default TestAddAllCommands $interpreter \
+            $ruleSetClientData null false false tokens errors]
+
+        if {[llength $tokens] > 0} then {
+          eval lappend ::eagle_debugger($cacheName) $tokens
+          host result Ok [appendArgs "added commands: " $tokens \n]
+        }
+
+        if {$code ne "Ok"} then {
+          error [getStringFromObjectHandle $errors]
+        }
+      } else {
+        set results null
+
+        set code [object invoke -alias \
+            Eagle._Tests.Default TestAddCommands $interpreter \
+            null results]
+
+        set tokens [list]
+
+        object foreach -alias result $results {
+          if {[isNonNullObjectHandle $result]} then {
+            set token [$result ToString]
+
+            if {[string is wideinteger -strict $token]} then {
+              lappend tokens $token
+            }
+          }
+        }
+
+        if {[llength $tokens] > 0} then {
+          eval lappend ::eagle_debugger($cacheName) $tokens
+          host result Ok [appendArgs "added commands: " $tokens \n]
+        }
+
+        if {$code ne "Ok"} then {
+          error [getStringFromObjectHandle $results]
+        }
+      }
+    } else {
+      if {[info exists ::eagle_debugger($cacheName)]} then {
+        set tokens [object create -alias LongList]
+
+        foreach token $::eagle_debugger($cacheName) {
+          if {[string is wideinteger -strict $token]} then {
+            $tokens Add $token
+          }
+        }
+
+        set errors null
+
+        set code [object invoke -alias \
+            Eagle._Tests.Default TestRemoveCommands $interpreter \
+            null tokens errors]
+
+        set ::eagle_debugger($cacheName) $tokens; # modified (?)
+
+        if {$code ne "Ok"} then {
+          error [getStringFromObjectHandle $errors]
+        }
+      } else {
+        error [appendArgs \
+            "cached \"" $cacheName "\" command tokens missing"]
+      }
+    }
+  }
+
+  proc #env { {enable ""} {includeExisting false} } {
+    # <help>
+    # Enables, disables, or shows the custom environment variables managed by
+    # "Windows Command Processor Initialization for AutoRun" (startup) batch
+    # script(s).  Generally, this command will only work when the "Eagle.Test"
+    # package is available -AND- the Windows Command Processor has NOT already
+    # setup its environment via the "Windows Command Processor Initialization
+    # for AutoRun" (startup) batch script(s), e.g. an Eagle Shell process that
+    # was started via double-click, etc, and NOT via a normal Windows Command
+    # Processor instance.
+    # </help>
+
+    if {![info exists ::eagle_debugger(#env)]} then {
+      #
+      # HACK: Cache for later use by UNSET (below), et al.
+      #
+      package require Eagle.Test
+
+      set ::eagle_debugger(#env) [getEnvironmentViaComSpec \
+          $includeExisting]
+    }
+
+    foreach pair $::eagle_debugger(#env) {
+      set name [lindex $pair 0]
+      set value [lindex $pair 1]
+
+      if {[string length $enable] > 0} then {
+        if {$enable} then {
+          set ::env($name) $value
+          set op SET
+        } else {
+          set value $::env($name)
+          unset -nocomplain ::env($name)
+          set op UNSET
+        }
+      } else {
+        set op SHOW
+      }
+
+      switch -exact -- $op {
+        SHOW {
+          set code Return
+        }
+        SET {
+          set code Break
+        }
+        UNSET {
+          set code Continue
+        }
+        default {
+          set code Error
+        }
+      }
+
+      host result $code [appendArgs \
+          $op " ENV " $name " ==> \{" $value \}\n]
+    }
+
+    return $::eagle_debugger(#env)
+  }
+
+  proc #zeus { {enable ""} } {
+    # <help>
+    # Enables or disables use of the Zeus plugin to handle "script" update
+    # checks.  After using this procedure, the "#check 1" command should be
+    # used to make sure things are working as expected.
+    # </help>
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    uplevel 1 [list source [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Public \
+        checkUpdateZeusHook.eagle]]
+
+    return [enableZeusUpdateHook $enable]
+  }
+
+  proc #histset { enable {lock false} } {
+    # <help>
+    # Enables or disables command history tracking for the interpreter, with
+    # the option to prevent it from being enabled or disabled (again) in the
+    # future.
+    # </help>
+
+    if {!$lock} then {
+      set savedLocked [object invoke -flags +NonPublic \
+          Interpreter.GetActive IsHistoryLocked]
+    }
+
+    try {
+      object invoke -flags +NonPublic Interpreter.GetActive \
+          SetHistoryLocked false
+
+      object invoke Interpreter.GetActive History $enable
+
+      set enabled [object invoke Interpreter.GetActive History]
+
+      host result Ok [appendArgs \
+          "Command history " [expr {$enabled ? "enabled" : "disabled"}] .\n]
+    } finally {
+      if {$lock} then {
+        object invoke -flags +NonPublic \
+            Interpreter.GetActive SetHistoryLocked true
+      } else {
+        object invoke -flags +NonPublic \
+            Interpreter.GetActive SetHistoryLocked $savedLocked
+      }
+
+      set locked [object invoke -flags +NonPublic \
+          Interpreter.GetActive IsHistoryLocked]
+
+      host result Ok [appendArgs \
+          "Command history " [expr {$locked ? "locked" : "unlocked"}] .\n]
+    }
+  }
+
+  proc #cfgharpy {} {
+    # <help>
+    # Attempts to enter the interactive command loop provided by the Harpy
+    # configuration subsystem.
+    # </help>
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    if {[llength [info commands ksource]] == 0} then {
+      package require Licensing.Enterprise
+    }
+
+    return [uplevel 1 [list \
+        ksource -withcommands -useshared -useplugin -usecontext -- \
+        [file join $::env(SCRATCH_ROOT) eagle Harpy Configurations \
+        InteractiveLoop interactive_loop.eagle]]]
+  }
+
+  proc #unlockvar { varName } {
+    # <help>
+    # Attempts to forcibly unlock the specified variable.
+    # </help>
+
+    set uniqueId [format %lX [expr {random()}]]
+
+    set localVarName1 [appendArgs $uniqueId _variableFlags]
+    set localVarName2 [appendArgs $uniqueId _variable]
+    set localVarName3 [appendArgs $uniqueId _error]
+
+    uplevel 1 [list set $localVarName1 NoUsable]
+    uplevel 1 [list set $localVarName2 null]
+    uplevel 1 [list set $localVarName3 null]
+
+    set code [uplevel 1 [list object invoke -flags +NonPublic \
+        Interpreter.GetActive GetVariableViaResolversWithSplit \
+        $varName $localVarName1 $localVarName2 $localVarName3]]
+
+    set variableFlags [uplevel 1 [list set $localVarName1]]
+    set variable [uplevel 1 [list set $localVarName2]]
+    set error [uplevel 1 [list set $localVarName3]]
+
+    uplevel 1 [list unset -nocomplain $localVarName1]
+    uplevel 1 [list unset -nocomplain $localVarName2]
+    uplevel 1 [list unset -nocomplain $localVarName3]
+
+    if {$code ne "Ok"} then {
+      error [getStringFromObjectHandle $error]
+    }
+
+    if {![isNonNullObjectHandle $variable]} then {
+      error [appendArgs \
+          "invalid instance for variable \"" \
+          $varName \"]
+    }
+
+    set oldThreadId [object invoke \
+        -flags +NonPublic $variable threadId]
+
+    object invoke -flags +NonPublic $variable \
+        threadId null
+
+    return $oldThreadId
+  }
+
+  proc #kthreads {} {
+    # <help>
+    # Attempts to kill all running threads that appear in the interpreter as
+    # opaque object handles.
+    # </help>
+
+    foreach object [info objects] {
+      if {[isNonNullObjectHandle $object] && \
+          [$object GetType] eq "System.Threading.Thread"} then {
+        set id [$object ManagedThreadId]
+
+        if {[catch {cleanupThread $object} result] == 0} then {
+          set result Ok
+        }
+
+        puts stdout [appendArgs \
+            "Thread " $id " CLEANUP ==> \{" $result \}]
+
+        if {[catch {object dispose $object} result] == 0} then {
+          set result Ok
+        }
+
+        puts stdout [appendArgs \
+            "Thread " $id " DISPOSE ==> \{" $result \}]
+      }
+    }
+  }
+
+  proc #showd {} {
+    # <help>
+    # Displays the current stack of working directories, if any, as well as
+    # the current directory.
+    # </help>
+
+    set maxLineLength 0
+
+    set lastPrefix "PWD ==> "
+    set lastDirectory [pwd]
+    set lastLine [appendArgs $lastPrefix $lastDirectory]
+    set lastLineLength [string length $lastLine]
+
+    if {[info exists ::eagle_debugger(directoryStack)]} then {
+      set reverse [lreverse $::eagle_debugger(directoryStack)]
+      set count [llength $reverse]
+      set lastIndex [expr {$count - 1}]
+
+      for {set index 0} {$index < $count} {incr index} {
+        if {$index == 0} then {
+          set thisPrefix "TOP ==> "
+        } elseif {$index == $lastIndex} then {
+          set thisPrefix "BOT ==> "
+        } else {
+          set thisPrefix "        "
+        }
+
+        set thisDirectory [lindex $reverse $index]
+
+        if {[string length $thisDirectory] > 0} then {
+          set thisLine [appendArgs $thisPrefix $thisDirectory]
+          set thisLineLength [string length $thisLine]
+
+          host result Continue $thisPrefix
+          host result Ok [appendArgs $thisDirectory \n]
+
+          if {$maxLineLength == 0 || \
+              $thisLineLength > $maxLineLength} then {
+            set maxLineLength $thisLineLength
+          }
+        }
+      }
+    } else {
+      set count 0
+    }
+
+    if {$maxLineLength > 0} then {
+      if {$lastLineLength > $maxLineLength} then {
+        set maxLineLength $lastLineLength
+      }
+
+      host result Return [appendArgs \
+          [string repeat - $maxLineLength] \n]
+    }
+
+    host result Continue $lastPrefix
+    host result Ok [appendArgs $lastDirectory \n]
+
+    return $count
+  }
+
+  proc #pushd { {directory ""} } {
+    # <help>
+    # Adds the current directory to the stack of working directories and
+    # optionally changes the current directory to the specified directory.
+    # </help>
+
+    set result ""
+
+    lappend ::eagle_debugger(directoryStack) [pwd]; # PUSH-END
+
+    if {[string length $directory] > 0} then {
+      cd [file normalize $directory]; set result [pwd]
+    }
+
+    return $result
+  }
+
+  proc #popd {} {
+    # <help>
+    # If there is a stack of working directories, remove topmost directory
+    # and change the current directory to match it.
+    # </help>
+
+    set result ""
+
+    if {[info exists ::eagle_debugger(directoryStack)] && \
+        [llength $::eagle_debugger(directoryStack)] > 0} then {
+      set directory [lindex $::eagle_debugger(directoryStack) end]
+
+      set ::eagle_debugger(directoryStack) \
+          [lrange $::eagle_debugger(directoryStack) 0 end-1]; # POP-END
+
+      if {[string length $directory] > 0} then {
+        cd [file normalize $directory]; set result [pwd]
+      }
+    }
+
+    return $result
+  }
+
+  proc #news {} {
+    # <help>
+    # Shows notable changes that have been made since the running release
+    # of Eagle, if any.
+    # </help>
+
+    set data [uri download -inline https://eagle.to/ChangeLog]
+    regexp -skip 1 -- {<pre>(.*)</pre>} $data data
+    set data [string map [list \r\n \n] $data]
+
+    set pattern [appendArgs \
+        {^(.*)\n\*+ } [string totitle $::eagle_platform(tag)] { } \
+        [string map [list . \\.] $::eagle_platform(patchLevel)] \
+        { RELEASE \*+}]
+
+    if {[regexp -skip 1 -- $pattern $data changes]} then {
+      set changes [string trim $changes]
+
+      host result Ok [appendArgs \
+          [object invoke System.Web.HttpUtility HtmlDecode $changes] \n]
+    }
+  }
+
+  proc #netcfg { enable {apiKey ""} } {
+    # <help>
+    # Enables or disables access to the "urn.to" network variable endpoint
+    # via linking the NetworkVariable class to the "network_config" global
+    # variable.
+    # </help>
+
+    if {[string length $apiKey] == 0} then {
+      if {[info exists ::env(NETCFG_API_KEY)]} then {
+        set apiKey $::env(NETCFG_API_KEY)
+      } else {
+        error "the NETCFG_API_KEY environment variable is not set"
+      }
+    }
+
+    if {$enable} then {
+      #
+      # NOTE: Make sure the network configuration is not already linked.
+      #
+      if {![info exists ::network_config]} then {
+        #
+        # NOTE: Grab the default encoding, which should be UTF-8.  This is
+        #       needed to prevent treating the HTTP request results as raw
+        #       bytes to be Base-64 encoded (i.e. if encoding was null).
+        #
+        set encoding [object invoke Interpreter DefaultEncoding]
+
+        #
+        # TODO: This API key may need to be updated in the future.
+        #
+        # WARNING: Fossil cannot handle having the query parameter "name"
+        #          used by scripts; therefore, use slightly more annoying
+        #          "varName" (and "varValue") instead.
+        #
+        if {[info exists ::remoteNetCfgBaseUri]} then {
+          set baseUri $::remoteNetCfgBaseUri
+        } else {
+          set baseUri https://urn.to/r/var
+        }
+
+        set networkVariable [object invoke -alias \
+            NetworkVariable Create null null null $baseUri null null \
+            $encoding null $apiKey null null null varName varValue \
+            BeforeVariable]
+
+        set result null
+        set code [$networkVariable AddVariable "" ::network_config result]
+
+        if {$code eq "Ok"} then {
+          host result Ok [appendArgs \
+              "Remote network configuration now linked with base URI \"" \
+              $baseUri \".\n]
+        } else {
+          host result Error [appendArgs \
+              "Cannot link to remote network configuration: " \
+              [getStringFromObjectHandle $result] \n]
+        }
+      } else {
+        host result Error "Remote network configuration already linked.\n"
+      }
+    } else {
+      #
+      # NOTE: Make sure the network configuration is not actually linked.
+      #
+      if {[info exists ::network_config]} then {
+        if {[catch {
+          unset -remove -- ::network_config; debug collect
+        } result] == 0} then {
+          host result Ok "Remote network configuration now unlinked.\n"
+        } else {
+          host result Error [appendArgs \
+              "Cannot unlink from remote network configuration: " \
+              $result \n]
+        }
+      } else {
+        host result Error "Remote network configuration not linked.\n"
+      }
+    }
+  }
+
+  proc #localnetcfg { enable } {
+    # <help>
+    # Enables or disables access to the localhost network variable endpoint
+    # via linking the NetworkVariable class to the "network_config" global
+    # variable.
+    # </help>
+
+    if {$enable} then {
+      #
+      # NOTE: Make sure the network configuration is not already linked.
+      #
+      if {![info exists ::network_config]} then {
+        #
+        # NOTE: Grab the default encoding, which should be UTF-8.  This is
+        #       needed to prevent treating the HTTP request results as raw
+        #       bytes to be Base-64 encoded (i.e. if encoding was null).
+        #
+        set encoding [object invoke Interpreter DefaultEncoding]
+
+        #
+        # TODO: This API key may need to be updated in the future.
+        #
+        # WARNING: Fossil cannot handle having the query parameter "name"
+        #          used by scripts; therefore, use slightly more annoying
+        #          "varName" (and "varValue") instead.
+        #
+        if {[info exists ::localNetCfgBaseUri]} then {
+          if {$::localNetCfgBaseUri eq "1"} then {
+            if {[info exists ::env(KAPOK_SETUP_PORT)] && \
+                [string is integer -strict $::env(KAPOK_SETUP_PORT)]} then {
+              set basePort $::env(KAPOK_SETUP_PORT); # ???
+            } else {
+              set basePort 1195; # ASP.NET Development Server
+            }
+
+            set baseUri [appendArgs \
+                http://localhost: $basePort /var/storage.cgi]; # faster
+          } else {
+            set baseUri $::localNetCfgBaseUri
+          }
+        } else {
+          set baseUri https://urn.to/r/var_local
+        }
+
+        set networkVariable [object invoke -alias \
+            NetworkVariable Create null null null $baseUri null null \
+            $encoding null 40c92a8b6515452da8cb6855a2208c69 null null \
+            null varName varValue BeforeVariable]
+
+        set result null
+        set code [$networkVariable AddVariable "" ::network_config result]
+
+        if {$code eq "Ok"} then {
+          host result Ok [appendArgs \
+              "Local network configuration now linked with base URI \"" \
+              $baseUri \".\n]
+        } else {
+          host result Error [appendArgs \
+              "Cannot link to local network configuration: " \
+              [getStringFromObjectHandle $result] \n]
+        }
+      } else {
+        host result Error "Local network configuration already linked.\n"
+      }
+    } else {
+      #
+      # NOTE: Make sure the network configuration is not actually linked.
+      #
+      if {[info exists ::network_config]} then {
+        if {[catch {
+          unset -remove -- ::network_config; debug collect
+        } result] == 0} then {
+          host result Ok "Local network configuration now unlinked.\n"
+        } else {
+          host result Error [appendArgs \
+              "Cannot unlink from local network configuration: " \
+              $result \n]
+        }
+      } else {
+        host result Error "Local network configuration not linked.\n"
+      }
+    }
+  }
+
+  proc #guru { enable } {
+    # <help>
+    # Enables or disables "guru" mode for the current interpreter.  You
+    # should already know what this does if you intend to use it.
+    # </help>
+
+    if {$enable} then {
+      #
+      # NOTE: Ooh, internals.  All the fun stuff is in here.  Once you
+      #       start down the dark path...
+      #
+      object import -container [lindex [info assembly] 0] \
+          Eagle._Components.Private
+
+      #
+      # NOTE: Brain twister here.  Use NonPublic access to enable it by
+      #       default.
+      #
+      object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+          Eagle._Components.Private.ObjectOps DefaultBindingFlags \
+          +NonPublic
+
+      host result Ok "Guru mode now enabled, enhance your calm.\n"
+    } else {
+      #
+      # NOTE: Attempt to undo (just) what we did before.
+      #
+      object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+          Eagle._Components.Private.ObjectOps DefaultBindingFlags \
+          -NonPublic
+
+      object unimport -importpattern Eagle._Components.Private
+
+      host result Ok "Guru mode now disabled, party on dude.\n"
+    }
+  }
+
+  proc #scrub { {vars true} {procs true} {ns true} {pkgs true} } {
+    # <help>
+    # Remove all script variables and procedures that were not defined
+    # by the core script library -OR- its interactive startup scripts.
+    # </help>
+
+    #
+    # NOTE: First, [unset] all non-library variables.  Mostly, these
+    #       are things added by the test suite.
+    #
+    if {$vars} then {
+      set libraryVarNames [uplevel #0 [list info sysvars]]
+
+      foreach varName [info globals] {
+        if {[lsearch -exact -- $libraryVarNames $varName] == -1} then {
+          uplevel #0 [list unset $varName]
+          host result Ok [appendArgs "unset variable \"::" $varName \"\n]
+        }
+      }
+
+      #
+      # NOTE: *SPECIAL* The "test_file" variable is a library variable;
+      #       however, it is not [set] during interpreter creation.  So,
+      #       [unset] it now.
+      #
+      if {[uplevel #0 [list info exists test_file]]} then {
+        uplevel #0 [list unset -nocomplain test_file]
+        host result Ok "unset variable \"::test_file\"\n"
+      }
+    }
+
+    #
+    # NOTE: Remove script procedures that were not defined by the core
+    #       script library -OR- its interactive startup scripts.
+    #
+    if {$procs} then {
+      set libraryProcNames [info commands \
+          -nocommands -noexecutes -hidden -library --]
+
+      set interactiveProcNames [info commands \
+          -nocommands -noexecutes -hidden -interactive --]
+
+      foreach procName [info procs] {
+        if {[lsearch -exact -- $libraryProcNames $procName] == -1 && \
+            [lsearch -exact -- $interactiveProcNames $procName] == -1} then {
+          rename $procName ""
+          host result Ok [appendArgs "deleted procedure \"::" $procName \"\n]
+        }
+      }
+    }
+
+    #
+    # NOTE: Delete all child namespaces except those that were added by
+    #       the core library itself.
+    #
+    if {$ns} then {
+      if {[namespace enable]} then {
+        foreach nsName [namespace children ::] {
+          #
+          # TODO: Update this list of "system" namespaces if the core
+          #       library needs more.
+          #
+          if {$nsName ni [list ::tcl]} then {
+            namespace delete $nsName
+            host result Ok [appendArgs "deleted namespace \"" $nsName \"\n]
+          }
+        }
+      }
+    }
+
+    #
+    # NOTE: Remove all non-static packages that were not added via a
+    #       plugin -OR- via the core script library.
+    #
+    if {$pkgs} then {
+      foreach pkgName [package loaded] {
+        set flags [string map [list , " "] [getDictionaryValue \
+            [package info $pkgName] flags]]
+
+        if {[lsearch -exact -- $flags Static] == -1 && \
+            [lsearch -exact -- $flags Plugin] == -1 && \
+            [lsearch -exact -- $flags Library] == -1} then {
+          package withdraw $pkgName [package withdraw $pkgName]
+          host result Ok [appendArgs "withdrew package \"" $pkgName \"\n]
+        }
+      }
+    }
+  }
+
+  proc #unload { {all false} } {
+    # <help>
+    # When the "all" argument is zero, unloads all plugins that are not
+    # part of the core library itself.  When the "all" argument is non-zero,
+    # unloads all plugins, including those that are part of the core library
+    # itself.
+    # </help>
+
+    #
+    # NOTE: Setup local variables that will contain the file name housing
+    #       the core library plugins and the package name providing the
+    #       core command set.
+    #
+    set coreFileName [lindex [info assembly] end]
+    set corePackageName ""
+
+    #
+    # NOTE: PHASE 1: Unload all non-core library plugins, in no particular
+    #       order.
+    #
+    foreach loaded [info loaded] {
+      set fileName [lindex $loaded 0]
+      set packageName [lindex $loaded 1]
+
+      if {![file same $fileName $coreFileName]} then {
+        eval unload $loaded
+      } elseif {[string match "Eagle._Plugins.Core, *" $packageName]} then {
+        set corePackageName $packageName
+      }
+    }
+
+    if {$all} then {
+      #
+      # NOTE: PHASE 2: Unload all core library plugins except the primary
+      #       one (i.e. the one that provides the core command set).
+      #
+      foreach loaded [info loaded] {
+        set fileName [lindex $loaded 0]
+        set packageName [lindex $loaded 1]
+
+        if {[file same $fileName $coreFileName] && \
+            ![string equal $packageName $corePackageName]} then {
+          eval unload $loaded
+        }
+      }
+
+      #
+      # NOTE: PHASE 3: Unload the core library plugin that provides the
+      #       core command set.  This will most likely be the last core
+      #       library command that can successfully execute as it will
+      #       cause all the others to be removed from this interpreter.
+      #
+      if {[string length $coreFileName] > 0 && \
+          [string length $corePackageName] > 0} then {
+        unload $coreFileName $corePackageName
+      }
+    }
+  }
+
+  proc #rdbgc { {password ""} {autoLogin true} } {
+    # <help>
+    # Loads and sets up the remote debugger client.  Just do it!
+    # </help>
+
+    # namespace eval ::DebuggerShared {}
+    # set ::DebuggerShared::socket(debugSend) 1
+    # set ::DebuggerShared::socket(debugReceive) 1
+
+    if {![info exists ::env(MISTACHKIN_CHECKOUT_HOME)]} then {
+      error "the MISTACHKIN_CHECKOUT_HOME environment variable is not set"
+    }
+
+    if {[string length $password] == 0} then {
+      if {[info exists ::env(EagleRemoteDebuggerPassword)]} then {
+        set password $::env(EagleRemoteDebuggerPassword)
+      }
+    }
+
+    if {[string length $password] == 0} then {
+      if {[info exists ::env(EagleRemoteDebuggerPasswordFile)]} then {
+        set password [readFile $::env(EagleRemoteDebuggerPasswordFile)]
+      }
+    }
+
+    if {[string length $password] > 0} then {
+      if {[namespace enable]} then {
+        namespace eval ::DebuggerClient {}
+        set ::DebuggerClient::debuggerClientPassword $password
+      } else {
+        set ::debuggerClientPassword $password
+      }
+    }
+
+    set fileName [file join \
+        $::env(MISTACHKIN_CHECKOUT_HOME) class1 RemoteDebugger client \
+        debuggerClient.eagle]
+
+    uplevel 1 [list source $fileName]
+
+    host result Ok [appendArgs \
+        "Loaded client file \"" $fileName \".\n]
+
+    uplevel 1 {
+      namespace eval ::DebuggerClient {namespace export *}
+      namespace import ::DebuggerClient::*
+    }
+
+    if {[isEncryptionAvailable] && [string length $password] > 0} then {
+      uplevel 1 [list encryptWith $password]
+    }
+
+    if {$autoLogin} then {
+      host result Ok \
+          "Connecting to remote debugger server using \[connect\]...\n"
+
+      if {[catch {connect} result] == 0} then {
+        host result Ok [appendArgs $result \n]
+      } else {
+        host result Error [appendArgs "cannot connect, error: " $result \n]
+      }
+
+      host result Ok \
+          "Logging into remote debugger server using \[login\]...\n"
+
+      if {[catch {login} result] == 0} then {
+        host result Ok [appendArgs $result \n]
+      } else {
+        host result Error [appendArgs "cannot login, error: " $result \n]
+      }
+    }
+  }
+
+  proc #rdbgs { {password ""} } {
+    # <help>
+    # Loads and sets up the remote debugger server.  Just do it!
+    # </help>
+
+    # namespace eval ::DebuggerShared {}
+    # set ::DebuggerShared::socket(debugSend) 1
+    # set ::DebuggerShared::socket(debugReceive) 1
+
+    if {![info exists ::env(MISTACHKIN_CHECKOUT_HOME)]} then {
+      error "the MISTACHKIN_CHECKOUT_HOME environment variable is not set"
+    }
+
+    if {[string length $password] == 0} then {
+      if {[info exists ::env(EagleRemoteDebuggerPassword)]} then {
+        set password $::env(EagleRemoteDebuggerPassword)
+      }
+    }
+
+    if {[string length $password] == 0} then {
+      if {[info exists ::env(EagleRemoteDebuggerPasswordFile)]} then {
+        set password [readFile $::env(EagleRemoteDebuggerPasswordFile)]
+      }
+    }
+
+    if {[string length $password] > 0} then {
+      if {[namespace enable]} then {
+        namespace eval ::DebuggerServer {}
+        set ::DebuggerServer::debuggerServerPassword $password
+      } else {
+        set ::debuggerServerPassword $password
+      }
+    }
+
+    set fileName [file join \
+        $::env(MISTACHKIN_CHECKOUT_HOME) class1 RemoteDebugger server \
+        debuggerServer.eagle]
+
+    uplevel 1 [list source $fileName]
+
+    host result Ok [appendArgs \
+        "Loaded server file \"" $fileName \".\n]
+
+    uplevel 1 {
+      namespace eval ::DebuggerServer {namespace export *}
+      namespace import ::DebuggerServer::*
+    }
+
+    catch {uplevel 1 [list cleanupDebuggerServerThread]}
+    uplevel 1 [list setupDebuggerServerThread]
+
+    if {[string length $password] > 0} then {
+      uplevel 1 [list setupDebuggerServerEncryption $password]
+    }
+  }
+
+  proc #checktrust { {certificates false} {noSystem false} {verbose false} } {
+    # <help>
+    # Checks each assembly file that has been loaded into the application
+    # domain for a strong name signature, a code signing signature, and
+    # optionally an X.509 certificate.
+    # </help>
+
+    set errorCount 0
+
+    if {0} then {
+      #
+      # NOTE: This is not currently used; however, it could be useful when
+      #       needing to locate the .NET Framework directory from scripts;
+      #       therefore, it is being kept for reference.
+      #
+      set frameworkDirectory [file normalize [file join $::env(windir) \
+          Microsoft.NET [expr {$::tcl_platform(processBits) == 64 ? \
+          "Framework64" : "Framework"}] [appendArgs v [join [lrange \
+          [split $::eagle_platform(frameworkVersion) .] 0 end-1] .]]]]
+    }
+
+    set appDomain [object invoke -alias Interpreter.GetActive GetAppDomain]
+
+    if {[string length $appDomain] > 0} then {
+      set assemblies [$appDomain -alias GetAssemblies]
+
+      if {[string length $assemblies] > 0} then {
+        if {[info exists ::env(ProgramFiles(x86))]} then {
+          set programFiles $::env(ProgramFiles\(x86\))
+        } else {
+          set programFiles $::env(ProgramFiles)
+        }
+
+        set paths [list]
+
+        if {[info exists ::eagle_platform(imageRuntimeVersion)] && \
+            $::eagle_platform(imageRuntimeVersion) eq "v2.0.50727"} then {
+          #
+          # NOTE: Use the strong name tool for the .NET Framework 2.0/3.5.
+          #
+          lappend paths \
+              [file join $programFiles "Microsoft SDKs" Windows v7.1 bin] \
+              [file join $programFiles "Microsoft SDKs" Windows v7.0A bin] \
+              [file join $programFiles "Microsoft SDKs" Windows v6.0A bin] \
+              [file join $programFiles Microsoft.NET SDK v2.0 Bin]
+        } else {
+          #
+          # NOTE: Use the strong name tool for the .NET Framework 4.x.
+          #
+          lappend paths \
+              [file join $programFiles "Microsoft SDKs" Windows v10.0A bin \
+                  "NETFX 4.7.1 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v10.0A bin \
+                  "NETFX 4.6.2 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v10.0A bin \
+                  "NETFX 4.6.1 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v10.0A bin \
+                  "NETFX 4.6 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v8.1A bin \
+                  "NETFX 4.5.1 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v8.0A bin \
+                  "NETFX 4.0 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v7.1 bin \
+                  "NETFX 4.0 Tools"] \
+              [file join $programFiles "Microsoft SDKs" Windows v7.0A bin \
+                  "NETFX 4.0 Tools"]
+        }
+
+        set sn sn.exe; # NOTE: Fallback to "sn.exe" from existing PATH...
+
+        foreach path $paths {
+          if {[string length $path] > 0 && \
+              [file exists $path] && \
+              [file isdirectory $path]} then {
+            set fileName [file join $path sn.exe]
+
+            if {[file exists $fileName] && \
+                [file isfile $fileName] && \
+                [file executable $fileName]} then {
+              set sn $fileName; break
+            }
+          }
+        }
+
+        set separator [string repeat = [expr {[lindex [host size] 0] - 2}]]
+        set systemKeyTokens [list b77a5c561934e089 b03f5f7f11d50a3a]
+
+        object foreach -alias assembly $assemblies {
+          if {[string length $assembly] > 0} then {
+            set assemblyName [$assembly -alias GetName]
+
+            set publicKeyToken [object invoke -flags +NonPublic \
+                Eagle._Components.Private.AssemblyOps GetPublicKeyToken \
+                $assemblyName]
+
+            host result Break [appendArgs \
+                [$assemblyName Name] " (v" [$assemblyName Version] ") -- " \
+                [expr {[string length $publicKeyToken] > 0 ? $publicKeyToken : \
+                "<none>"}] \n]
+
+            if {[catch {$assembly Location} fileName]} then {
+              host result Error "Assembly location cannot be queried.\n"
+              host result Ok \n
+
+              continue
+            }
+
+            set isUnderSystemRoot [object invoke -flags +NonPublic \
+                Eagle._Components.Private.PathOps IsUnderPath "" \
+                $fileName $::env(SystemRoot)]
+
+            set goodStrongName false
+
+            if {[string length $publicKeyToken] > 0 && [catch {
+              exec -success Success -- $sn -vf $fileName
+            } result] == 0 && \
+                [regexp -line -- {^Assembly '.*?' is valid$} \
+                [string map [list \r\n \n] $result]]} then {
+              set goodStrongName true
+              host result Ok "Assembly has valid strong name.\n"
+            } else {
+              incr errorCount
+              host result Error "Assembly lacks valid strong name.\n"
+
+              if {$verbose} then {
+                host result Error [appendArgs $separator \n]
+                host result Error [appendArgs $result \n]
+                host result Error [appendArgs $separator \n]
+              }
+            }
+
+            set goodSignature false
+
+            if {[catch {
+              exec -success Success -- SigCheck.exe $fileName
+            } result] == 0 && \
+                [regexp -line -- {^	Verified:	Signed$} \
+                [string map [list \r\n \n] $result]]} then {
+              set goodSignature true
+              host result Ok "Assembly has verified signature.\n"
+            } else {
+              incr errorCount
+              host result Error "Assembly lacks verified signature.\n"
+
+              if {$verbose} then {
+                host result Error [appendArgs $separator \n]
+                host result Error [appendArgs $result \n]
+                host result Error [appendArgs $separator \n]
+              }
+            }
+
+            if {$certificates} then {
+              set goodCertificate false
+
+              if {[catch {
+                library certificate $fileName
+              } result] == 0 && [getDictionaryValue $result trusted]} then {
+                set goodCertificate true
+                host result Ok "Assembly has trusted certificate.\n"
+              } else {
+                set isSystem [expr {
+                  $isUnderSystemRoot && $publicKeyToken in $systemKeyTokens
+                }]
+
+                set goodSystem [expr {
+                  $isSystem && $goodStrongName && $goodSignature
+                }]
+
+                if {$noSystem || !$goodSystem} then {
+                  incr errorCount
+
+                  host result Error [appendArgs \
+                      [expr {$isSystem ? "System assembly" : "Assembly"}] \
+                      " lacks trusted certificate.\n"]
+                } else {
+                  host result Continue [appendArgs \
+                      [expr {$isSystem ? "System assembly" : "Assembly"}] \
+                      " lacks trusted certificate.\n"]
+                }
+              }
+            }
+
+            host result Ok \n
+          } else {
+            error "invalid assembly"
+          }
+        }
+      } else {
+        error "assemblies for application domain not available"
+      }
+    } else {
+      error "application domain not available"
+    }
+
+    return $errorCount
+  }
+
+  proc #checkfor { {channel stdout} } {
+    # <help>
+    # Attempts to run all test constraint package procedures that are used to
+    # check for test constraints, i.e. any procedure matching "checkFor*" that
+    # accepts a single "channel" parameter.
+    # </help>
+
+    package require Eagle.Test; package require Eagle.Test.Constraints
+
+    foreach name [info procs checkFor*] {
+      set args [info args $name]
+
+      if {[llength $args] == 1 && [lindex $args 0] eq "channel"} then {
+        $name $channel
+      }
+    }
+  }
+
+  proc #scriptthread { {script ""} } {
+    # <help>
+    # Creates a new ScriptThread object and optionally queues a script to it.
+    # The opaque object handle for the new ScriptThread is always returned.
+    # </help>
+
+    set result null
+
+    set scriptThread [object invoke -alias \
+        ScriptThread Create null {TclInterfaceUse Verbose NoAbort} \
+        {ScriptThreadUse UseNamespaces} ScriptThreadUse null null null \
+        null null null ::forever 0 2000 result]
+
+    if {[string length $scriptThread] > 0} then {
+      if {[string length $script] > 0} then {
+        if {[catch {$scriptThread Queue $script} error]} then {
+          host result Error $error
+        }
+      }
+    } elseif {[string length $result] > 0} then {
+      host result Error [$result ToString]
+    }
+
+    return $scriptThread
+  }
+
+  proc #loadtcl86 { {trustedOnly false} {findFlags ""} {loadFlags ""} } {
+    # <help>
+    # If necessary, loads native Tcl into the current interpreter, ignoring the
+    # one present in the "Externals" path, if any.  Also, sets the loader flag
+    # to permit ActiveTcl 8.6 (with "zlib1.dll") to be loaded without an error.
+    # </help>
+
+    if {![tcl ready]} then {
+      #
+      # HACK: Avoid using any TclKits or BaseKits here in case they
+      #       do not embed Tk correctly.  Also, make sure the Win32
+      #       SetDllDirectory API gets called prior to attempting to
+      #       load the native Tcl library; otherwise, the inability
+      #       of "tcl*.dll" to load "zlib1.dll" could cause issues.
+      #
+      #       tcl load -maybetrustedonly -bridge -findflags \
+      #           -OtherNamePatternList -loadflags +SetDllDirectory
+      #
+      set command [list tcl load -maybetrustedonly -bridge -robustify]
+
+      if {$trustedOnly} then {
+        if {[string length $findFlags] > 0} then {
+          lappend command -findflags [combineFlags $findFlags +TrustedOnly]
+        } else {
+          lappend command -findflags +TrustedOnly
+        }
+      } elseif {[string length $findFlags] > 0} then {
+        lappend command -findflags $findFlags
+      }
+
+      if {[string length $loadFlags] > 0} then {
+        lappend command -findflags $loadFlags
+      }
+
+      host result Ok [appendArgs \
+          "Loading native Tcl library via command \"" $command \"...\n]
+
+      return [uplevel 1 $command]
+    }
+  }
+
+  proc #qs { script {synchronous false} {force false} } {
+    # <help>
+    # Evaluates the specified script using the first available ScriptThread
+    # object in the current interpreter, synchronously or asynchronously.
+    # </help>
+
+    set scriptThread [lindex [info objects ScriptThread#*] 0]
+
+    if {[string length $scriptThread] == 0} then {
+      if {$force} then {
+        set scriptThread [\#scriptthread]
+
+        if {[string length $scriptThread] == 0} then {
+          error "failed to create script thread"
+        }
+      } else {
+        error "no script thread is available"
+      }
+    }
+
+    if {$synchronous} then {
+      set result null
+      set code [$scriptThread Send $script result]
+
+      if {$code eq "Ok"} then {
+        if {[string length $result] > 0} then {
+          return [getStringFromObjectHandle $result]
+        } else {
+          return "synchronous script success, no result is available"
+        }
+      } elseif {[string length $result] > 0} then {
+        error [getStringFromObjectHandle $result]
+      } else {
+        error "synchronous script failure, no error is available"
+      }
+    } else {
+      return [$scriptThread Queue $script]; # NOTE: true / false
+    }
+  }
+
+  proc #banner {} {
+    # <help>
+    # Displays the basic version summary information (i.e. the "banner").
+    # </help>
+
+    debug icommand "#version 1 0 0 0 0 0 0 0 1"
+  }
+
+  proc #fullversion {} {
+    # <help>
+    # Displays all version summary information.
+    # </help>
+
+    debug icommand "#version 1 1 1 1 1 1 1 1 0"
+  }
+
+  proc #testnone {} {
+    # <help>
+    # Runs the test suite prologue and epilogue; no actual tests are run.  This
+    # is useful for preparing the test suite environment without running any of
+    # the actual tests.
+    # </help>
+
+    #
+    # NOTE: Temporary reset the global argument list to forbid running any
+    #       actual test files.
+    #
+    uplevel 1 [list \#testsome ""]
+  }
+
+  proc #testfull {
+          isolated {security ""} {iis ""} {filePattern *} {testPattern *} } {
+    # <help>
+    # Runs the test suite, possibly using plugin isolation and/or secure mode,
+    # including the plugin tests, running only those tests that match the file
+    # name and test name patterns.
+    # </help>
+
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the XDG_STARTUP_HOME environment variable is not set"
+    }
+
+    if {[string length $security] > 0} then {
+      uplevel 1 [list \#isolation $isolated]
+      uplevel 1 [list \#security $security]
+
+      if {$security} then {
+        catch {
+          set packagePeerAssemblyPath [object invoke \
+              -flags +NonPublic Eagle._Components.Private.GlobalState \
+              packagePeerAssemblyPath]
+
+          if {[string length $packagePeerAssemblyPath] > 0} then {
+            file copy [file join $::env(XDG_STARTUP_HOME) \
+                Certificates Script Plugin1.0 pkgIndex.eagle.harpy] \
+                [file join $packagePeerAssemblyPath \
+                Plugin1.0 pkgIndex.eagle.harpy]
+          }
+        }
+      }
+    }
+
+    uplevel 1 [list \#testsome $filePattern $testPattern]
+    uplevel 1 [list \#badgetest $isolated $iis]
+  }
+
+  proc #testsome { {filePattern *} {testPattern *} } {
+    # <help>
+    # Runs the test suite, running only those tests that match the file name
+    # and test name patterns.
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    set fileName [file join $::env(EAGLE) Library Tests all.eagle]
+
+    if {![file exists $fileName]} then {
+      error [appendArgs "file \"" $fileName "\" does not exist"]
+    }
+
+    global argv
+
+    if {[info exists argv]} then {
+      set savedArgv $argv
+    } else {
+      unset -nocomplain savedArgv
+    }
+
+    try {
+      #
+      # NOTE: Temporary reset the global argument list to limit the tests run.
+      #
+      lappend argv -file $filePattern -match $testPattern
+
+      #
+      # NOTE: Evaluate the primary test suite file in the global context.  The
+      #       net effect of this will be that the main test suite prologue and
+      #       epilogue files will fully setup the test environment without
+      #       running any tests.
+      #
+      uplevel #0 [list source $fileName]
+    } finally {
+      if {[info exists savedArgv]} then {
+        set argv $savedArgv
+        unset -nocomplain savedArgv
+      } else {
+        unset -nocomplain argv
+      }
+    }
+  }
+
+  proc #testmods {} {
+    # <help>
+    # Attempts to run tests that are modified in the current checkout.
+    # </help>
+
+    if {![info exists ::root_path]} then {
+      error "root directory of source checkout is not set, run #testnone"
+    }
+
+    set fileNames [list]
+    set pwd [pwd]; cd $::root_path
+
+    try {
+      set output [string map [list \r\n \n] [\#fossil changes]]
+      set pattern [file join Eagle Library Tests *.eagle]
+      set skipped [list all.eagle epilogue.eagle prologue.eagle]
+
+      foreach line [split $output \n] {
+        foreach {type fileName} [split $line] {
+          if {[string length $fileName] == 0} then {
+            continue
+          }
+          if {![string match -nocase -- $pattern $fileName]} then {
+            continue
+          }
+          set fileName [file tail $fileName]
+          if {$fileName in $skipped} then {
+            continue
+          }
+          lappend fileNames $fileName
+        }
+      }
+    } finally {
+      if {[info exists pwd]} then {
+        cd $pwd; unset pwd
+      }
+    }
+
+    if {[llength $fileNames] > 0} then {
+      uplevel 1 [list \#testsome $fileNames]
+    } else {
+      error "no test files have been changed"
+    }
+  }
+
+  proc #veryquick { {filePattern *} {testPattern *} } {
+    # <help>
+    # Attempts to run all tests except those that are overly time consuming.
+    # </help>
+
+    array set savedNo [array get ::no]
+
+    set ::no(processorIntensive) 1
+    set ::no(stackIntensive) 1
+    set ::no(memoryIntensive) 1
+    set ::no(timeIntensive) 1
+    set ::no(fileSystemIntensive) 1
+
+    try {
+      uplevel 1 [list \#testsome $filePattern $testPattern]
+    } finally {
+      unset ::no(fileSystemIntensive)
+      unset ::no(timeIntensive)
+      unset ::no(memoryIntensive)
+      unset ::no(stackIntensive)
+      unset ::no(processorIntensive)
+
+      array set ::no [array get savedNo]
+      unset -nocomplain savedNo
+    }
+  }
+
+  proc #freemem { aggressive } {
+    # <help>
+    # Attempts to free up memory that may be in use by interpreter caches or
+    # by managed objects in need of garbage collection.
+    # </help>
+
+    if {$aggressive} then {
+      foreach interpName [info interps] {
+        set interp null
+        set error1 null
+
+        set code [object invoke -flags +NonPublic -alias \
+            Eagle._Components.Private.GlobalState GetInterpreter \
+            $interpName Interpreter null interp error1]
+
+        if {$code eq "Ok"} then {
+          if {[catch {
+            $interp ClearCaches ObjectMask false
+          } error2] == 0} then {
+            host result Ok [appendArgs "interp " $interpName ": Ok\n"]
+          } else {
+            host result Error [appendArgs $error2 \n]
+          }
+        } else {
+          host result Error [appendArgs [$error1 ToString] \n]
+        }
+      }
+
+      unset -nocomplain error2 error1 code interp interpName
+    } else {
+      set interpName [object invoke Interpreter.GetActive Id]
+
+      if {[catch {
+        object invoke Interpreter.GetActive ClearCaches ObjectMask false
+      } error2] == 0} then {
+        host result Ok [appendArgs "interp " $interpName ": Ok\n"]
+      } else {
+        host result Error [appendArgs $error2 \n]
+      }
+
+      unset -nocomplain error2 interpName
+    }
+
+    package require Eagle.Test
+    purgeAndCleanup stdout #freemem
+    uplevel 1 [list purgeAndCleanup stdout global]
+  }
+
+  proc #sleepsoon { {enable ""} } {
+    # <help>
+    # Attempts to enable or disable the automatic idle sleep feature of the
+    # operating system (after 10 minutes).
+    # </help>
+
+    set schemeGuid 381b4222-f694-41f0-9685-ff5bb260df2e; # Balanced
+    set subGuid 238c9fa8-0aad-41ed-83f4-97be242c8f20; # Sleep
+
+    if {[string length $enable] > 0} then {
+      set settingGuid 29f6c1db-86da-48c5-9fdb-f2b67b1f44da; # Sleep after
+
+      set op [expr {$enable ? "enabled" : "disabled"}]
+      set value [expr {$enable ? 600 : 0}]
+
+      if {[catch {
+        exec -success Success -- powercfg.exe -SETACVALUEINDEX \
+            $schemeGuid $subGuid $settingGuid $value
+      } result] == 0} then {
+        host result Ok [appendArgs \
+            "Successfully " $op " automatic idle sleep.\n"]
+      } else {
+        host result Error [appendArgs \
+            "Automatic idle sleep could not be " $op \
+            ": " $result \n]
+      }
+    } else {
+      host result Continue \
+          "Skipped setting automatic idle sleep.\n"
+    }
+
+    puts [appendArgs \n \
+        [exec -success Success -- powercfg.exe -QUERY \
+        $schemeGuid $subGuid]]
+  }
+
+  proc #idlesoon { {enable ""} } {
+    # <help>
+    # Attempts to enable or disable the automatic screen-off feature of the
+    # operating system (after 2 minutes).
+    # </help>
+
+    set schemeGuid 381b4222-f694-41f0-9685-ff5bb260df2e; # Balanced
+    set subGuid 7516b95f-f776-4464-8c53-06167f40cc99; # Display
+
+    if {[string length $enable] > 0} then {
+      set settingGuid \
+          3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e; # Turn off display after
+
+      set op [expr {$enable ? "enabled" : "disabled"}]
+      set value [expr {$enable ? 120 : 0}]
+
+      if {[catch {
+        exec -success Success -- powercfg.exe -SETACVALUEINDEX \
+            $schemeGuid $subGuid $settingGuid $value
+      } result] == 0} then {
+        host result Ok [appendArgs \
+            "Successfully " $op " automatic display off.\n"]
+      } else {
+        host result Error [appendArgs \
+            "Automatic display off could not be " $op \
+            ": " $result \n]
+      }
+    } else {
+      host result Continue \
+          "Skipped setting automatic display off.\n"
+    }
+
+    puts [appendArgs \n \
+        [exec -success Success -- powercfg.exe -QUERY \
+        $schemeGuid $subGuid]]
+  }
+
+  proc #badge {} {
+    # <help>
+    # Attempts to load the Harpy and Badge plugins and then enable standard
+    # script file signature checking.
+    # </help>
+
+    #
+    # NOTE: Must do this first because all other plugins require the license
+    #       certificate checking.  Also, this installs the secure script, file,
+    #       and stream policies.
+    #
+    host result Ok [appendArgs \
+        "Harpy: " [package require Licensing.Enterprise] \n\n]
+
+    #
+    # NOTE: Configure the secure script, file, stream, and other policies.  Also
+    #       note that setting the "VerifyFile" for the stream policy will most
+    #       likely cause it to fail all the time.
+    #
+    host result Ok [appendArgs \
+        "Policy: " [certificate policy -local true -enabled true] \n\n]
+
+    #
+    # NOTE: Next, bootstrap the trusted signed file/script policies by merging
+    #       the key pair(s) used to sign the script library and test suites.
+    #
+    host result Ok [appendArgs \
+        "Key ring bootstrap: " [keyring bootstrap] \n\n]
+
+    #
+    # NOTE: Load the plugin that provides the script certificates for the files
+    #       in the standard Eagle script library, including the testing package.
+    #
+    host result Ok [appendArgs "Badge: " [package require Badge.Enterprise] \n\n]
+  }
+
+  proc #timecheck { {viaHttp ""} } {
+    # <help>
+    # Attempts to check the local system time against an official network time
+    # (NTP -OR- HTTPS) server and reports the results.
+    # </help>
+
+    package require Security.Core
+
+    set command [list certificate time -signed]
+
+    if {[string length $viaHttp] > 0} then {
+      lappend command -viahttp $viaHttp
+
+      if {$viaHttp} then {
+        lappend command -refresh --
+        lappend command EagleDemoPublic.snk
+        set type HTTPS
+
+        if {![security ""]} then {
+          uplevel 1 [list source enableSecurity]
+        }
+      } else {
+        lappend command --
+        set type NTP
+      }
+    } else {
+      lappend command --
+      set type automatic
+    }
+
+    set d(1) [object invoke -create -alias DateTime UtcNow]
+    set d(2) [eval object create -alias DateTime [lreverse [eval $command]]]
+    set d(3) [expr {[$d(1) Ticks] - [$d(2) Ticks]}]
+    set tps [object invoke TimeSpan TicksPerSecond].0
+
+    if {$d(3) > 0} then {
+      set d(4) [appendArgs \
+          "local ahead by " [expr {$d(3) / $tps}]]
+    } elseif {$d(3) < 0} then {
+      set d(4) [appendArgs \
+          "local behind by " [expr {abs($d(3) / $tps)}]]
+    } else {
+      #
+      # NOTE: This can basically never happen.
+      #
+      set d(4) "local matches remote"
+    }
+
+    host result Ok [appendArgs \
+        " local (" $type "): " [certificate formattimestamp $d(1)] \n]
+
+    host result Ok [appendArgs \
+        "remote (" $type "): " [certificate formattimestamp $d(2)] \n]
+
+    host result Ok [appendArgs "result (" $type "): " $d(4) \n]
+  }
+
+  proc #autocheck { {force false} {automatic false} } {
+    # <help>
+    # Checks for updates to the Eagle core library.  If found, runs the updater
+    # user interface, optionally in fully automatic mode.  If the force parameter
+    # is non-zero, the current patch level of the Eagle core library will be set
+    # to a value that guarantees the updater will run.
+    # </help>
+
+    if {$force} then {
+      set ::eagle_platform(patchLevel) 1.0.5000.00000
+    }
+
+    debug icommand [list #check false false true $automatic]
+  }
+
+  proc #scriptcheck {} {
+    # <help>
+    # Checks for and attempts to evaluate any available update scripts.  The
+    # Harpy, Badge, and Zeus plugins are required.
+    # </help>
+
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the XDG_STARTUP_HOME environment variable is not set"
+    }
+
+    \#badge
+
+    set fileName [file join \
+        $::env(XDG_STARTUP_HOME) Scripts checkUpdateZeusHook.eagle]
+
+    if {![file exists $fileName]} then {
+      error [appendArgs "file \"" $fileName "\" does not exist"]
+    }
+
+    uplevel 1 [list source $fileName]
+    hookGetUpdateScriptData; # NOTE: From "checkUpdateZeusHook.eagle".
+    debug icommand "#check true"
+  }
+
+  proc #log {} {
+    # <help>
+    # Launches the configured text editor with the ChangeLog file.
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    \#edit [file join $::env(EAGLE) ChangeLog]
+  }
+
+  proc #tlog {} {
+    # <help>
+    # Launches the configured text editor with the current test log file.
+    # </help>
+
+    if {[info exists ::test_log]} then {
+      if {[file exists $::test_log]} then {
+        \#edit $::test_log
+      } else {
+        error "it would appear that the test log is missing"
+      }
+    } else {
+      error "it would appear that no tests have yet been run"
+    }
+  }
+
+  proc #getinterp { {name 1} } {
+    # <help>
+    # Returns the opaque object handle for the specified interpreter.
+    # </help>
+
+    set interpreter null
+    set error null
+
+    set code [object invoke -alias -objectflags +NoDispose \
+        Value GetInterpreter "" $name Default interpreter error]
+
+    if {$code ne "Ok"} then {
+      error [$error ToString]
+    }
+
+    return $interpreter
+  }
+
+  proc #attachinterp { {interp ""} } {
+    # <help>
+    # Attempts to start an interactive debugging session in the specified
+    # (or default) interpreter.
+    # </help>
+
+    if {[string length $interp] == 0} then {
+      set interp [\#getinterp]
+    }
+
+    set result null
+    set code [object invoke -alias \
+        $interp EvaluateScript {debug setup true true} result]
+
+    if {$code ne "Ok"} then {
+      error [$result ToString]
+    }
+
+    set result null
+    set code [object invoke -alias \
+        $interp EvaluateScript {debug interactive true} result]
+
+    if {$code ne "Ok"} then {
+      error [$result ToString]
+    }
+
+    set result null
+    set code [object invoke -alias \
+        $interp EvaluateScript {debug break} result]
+
+    if {$code ne "Ok"} then {
+      error [$result ToString]
+    }
+
+    return ""
+  }
+
+  proc #meminfo { {collect false} } {
+    # <help>
+    # Displays information about the managed (and optionally native) memory usage
+    # for the current process.
+    # </help>
+
+    if {$collect} then {
+      uplevel 1 [list debug purge]
+      debug collect
+    }
+
+    set coords [host writebox -multiple -pairs [debug memory]]
+    host position -x 0 -y [lindex $coords 1]
+
+    return ""
+  }
+
+  proc #nativestack {} {
+    # <help>
+    # Displays information about the native stack for the current thread and
+    # process.
+    # </help>
+
+    set coords [host writebox -multiple -pairs [debug stack true]]
+    host position -x 0 -y [lindex $coords 1]
+    return ""
+  }
+
+  proc #lastlog {} {
+    # <help>
+    # Launches the configured text editor with the previous test log file.
+    # </help>
+
+    package require Eagle.Test
+
+    set fileName [getLastTestLog]
+
+    if {[string length $fileName] > 0 && [file exists $fileName]} then {
+      \#edit $fileName
+    } else {
+      error "it would appear that no tests have ever been run"
+    }
+  }
+
+  proc #edittest { name } {
+    # <help>
+    # Launches the configured text editor with the specified test file.
+    # </help>
+
+    if {[info exists ::test_path]} then {
+      set name [file rootname [file tail $name]]
+
+      if {[string length $name] > 0} then {
+        set fileName [file join $::test_path [appendArgs $name .eagle]]
+
+        if {[file exists $fileName]} then {
+          \#edit $fileName
+        } else {
+          error [appendArgs \
+              "it would appear that test \"" $name "\" is missing"]
+        }
+      } else {
+        error "it would appear that the test name is invalid"
+      }
+    } else {
+      error "it would appear that no tests have yet been run"
+    }
+  }
+
+  proc #rerun {} {
+    # <help>
+    # Attempts to reevaluate the current script file as specified by the global
+    # script variable "$script", if any.
+    # </help>
+
+    if {![info exists ::script]} then {
+      error "cannot restart, no script available"
+    }
+
+    uplevel 1 [list source $::script]
+  }
+
+  proc #restart {} {
+    # <help>
+    # Attempts to relaunch the executable for the current process and then exit
+    # the current process.
+    # </help>
+
+    exec -shell -- [info nameofexecutable] &; exit -force
+  }
+
+  proc #histon {} {
+    # <help>
+    # Enables the recording of command history for this session.
+    # </help>
+
+    debug history true
+    host result Ok "command history enabled\n"
+  }
+
+  proc #histoff {} {
+    # <help>
+    # Disables the recording of command history for this session.
+    # </help>
+
+    debug history false
+    host result Ok "command history disabled\n"
+  }
+
+  proc #histfilt {} {
+    # <help>
+    # Sets the command history filter for this session to include only
+    # top-level commands.
+    # </help>
+
+    set filter [object create -alias HistoryFilter]; $filter StopLevel 1
+    object invoke Interpreter.GetActive HistoryInfoFilter $filter
+    host result Ok "command history filter set\n"
+  }
+
+  proc #nstest {} {
+    # <help>
+    # Runs the [namespace] tests from the Tcl test suite.
+    # </help>
+
+    catch {namespace enable true}
+    uplevel 1 [list \#testsome "namespace*.eagle"]
+  }
+
+  proc #monitorrequest { request } {
+    # <help>
+    # Issues a request against the built-in monitor plugin via the [debug
+    # pluginexecute] sub-command.  The request must be in the form of a
+    # list.
+    # </help>
+
+    set name [getPluginName "Eagle\\._Plugins\\.Monitor, Eagle, .*"]
+
+    if {[string length $name] == 0} then {
+      error "cannot find the monitor plugin"
+    }
+
+    debug pluginexecute $name $request
+  }
+
+  proc #bench { {n 10} {viaTest false} } {
+    # <help>
+    # Perform some basic benchmarking of performance for the interpreter.
+    # </help>
+
+    package require Eagle.Test
+
+    set i 0; set total 0
+
+    while {$i < $n} {
+      set j [calculateBogoCops]; incr i
+      incr total [expr {wide($j)}]
+      host result Continue .; # show something...
+      host result Return [appendArgs " " $j " "]
+      host result Continue .; # show something...
+    }
+
+    host result Continue \n; # done
+
+    host result Ok [appendArgs \
+        "Average (" $n ") BogoCops (commands-per-second)... " \
+        [expr {$total / $n}] \n]
+
+    if {$viaTest} then {
+      addRuntimeOption benchmarkOutputToFile
+      uplevel 1 [list \#testsome "benchmark.eagle"]
+    }
+  }
+
+  proc #cacheon { {capacity ""} {thread false} {flags false} {quiet false} } {
+    # <help>
+    # Enables caching of StringBuilder instances on a per-AppDomain
+    # basis.
+    # </help>
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.StringBuilderCache MaybeEnable true
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.StringBuilderCache MaybeCollect true
+
+    object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+        Interpreter.GetActive detailFlags +StringBuilderMask
+
+    if {[string is integer -strict $capacity]} then {
+      object invoke -flags +NonPublic \
+          Eagle._Components.Private.StringBuilderCache FixedCapacity \
+          $capacity
+
+      if {!$quiet} then {
+        host result Ok [appendArgs \
+            "StringBuilder cached capacity fixed to " $capacity .\n]
+      }
+    }
+
+    if {$flags} then {
+      if {[lsearch -exact -- \
+          $::eagle_platform(compileOptions) THREADING] != -1} then {
+        #
+        # HACK: This must be done asynchronously because of startup use
+        #       of the EndNoArgumentCache method.
+        #
+        proc enableStringBuilderCacheFlags { state } {
+          object removecallback enableStringBuilderCacheFlags
+          rename enableStringBuilderCacheFlags ""
+
+          after 10000
+
+          object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+              Interpreter.GetActive cacheFlags +StringBuilder
+        }
+
+        object invoke System.Threading.ThreadPool \
+            QueueUserWorkItem enableStringBuilderCacheFlags
+
+        if {!$quiet} then {
+          host result Ok "StringBuilder cache flags will be enabled.\n"
+        }
+      } else {
+        if {!$quiet} then {
+          host result Break [appendArgs \
+              "\nWARNING: Compile option \"THREADING\" is disabled, " \
+              "StringBuilder cache flags will NOT be enabled.\n\n"]
+        }
+      }
+    }
+
+    if {$thread} then {
+      set result [object invoke -flags +NonPublic \
+          Eagle._Components.Private.StringBuilderCache \
+          MaybeEnableThread true]
+
+      if {$result} then {
+        if {!$quiet} then {
+          host result Ok "StringBuilder thread enabled.\n"
+        }
+      } else {
+        if {!$quiet} then {
+          host result Error "StringBuilder thread failure?\n"
+        }
+      }
+    }
+
+    if {!$quiet} then {
+      host result Ok "StringBuilder cache enabled.\n"
+    }
+  }
+
+  proc #cacheoff { {thread false} {flags false} {quiet false} } {
+    # <help>
+    # Disables caching of StringBuilder instances on a per-AppDomain
+    # basis.
+    # </help>
+
+    object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+        Interpreter.GetActive detailFlags -StringBuilderMask
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.StringBuilderCache MaybeEnable false
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.StringBuilderCache MaybeCollect false
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.StringBuilderCache FixedCapacity 0
+
+    if {$flags} then {
+      if {[lsearch -exact -- \
+          $::eagle_platform(compileOptions) THREADING] != -1} then {
+        #
+        # HACK: This must be done asynchronously because of startup use
+        #       of the EndNoArgumentCache method.
+        #
+        proc disableStringBuilderCacheFlags { state } {
+          object removecallback disableStringBuilderCacheFlags
+          rename disableStringBuilderCacheFlags ""
+
+          after 10000
+
+          object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+              Interpreter.GetActive cacheFlags -StringBuilder
+        }
+
+        object invoke System.Threading.ThreadPool \
+            QueueUserWorkItem disableStringBuilderCacheFlags
+
+        if {!$quiet} then {
+          host result Ok "StringBuilder cache flags will be disabled.\n"
+        }
+      } else {
+        if {!$quiet} then {
+          host result Break [appendArgs \
+              "\nWARNING: Compile option \"THREADING\" is disabled, " \
+              "StringBuilder cache flags will NOT be disabled.\n\n"]
+        }
+      }
+    }
+
+    if {$thread} then {
+      set result [object invoke -flags +NonPublic \
+          Eagle._Components.Private.StringBuilderCache \
+          MaybeEnableThread false]
+
+      if {$result} then {
+        if {!$quiet} then {
+          host result Ok "StringBuilder thread disabled.\n"
+        }
+      } else {
+        if {!$quiet} then {
+          host result Error "StringBuilder thread zombied?\n"
+        }
+      }
+    }
+
+    if {!$quiet} then {
+      host result Ok "StringBuilder cache disabled.\n"
+    }
+  }
+
+  proc #traceon { {stateTypes "=CoreEnableMask +ForceListeners"} } {
+    # <help>
+    # Enables standard diagnostic tracing for this session.
+    # </help>
+
+    package require Eagle.Test
+
+    return [enableTracing $stateTypes]
+  }
+
+  proc #traceoff { {stateTypes "=CoreDisableMask +ForceListeners"} } {
+    # <help>
+    # Disables standard diagnostic tracing for this session.
+    # </help>
+
+    package require Eagle.Test
+
+    return [disableTracing $stateTypes]
+  }
+
+  proc #objtrace { enabled } {
+    # <help>
+    # Enables verbose object method tracing for this session.
+    # </help>
+
+    set flags [object invoke -flags +NonPublic \
+        Eagle._Components.Private.ObjectOps TraceOptionFlags]
+
+    if {$enabled} then {
+      set newFlags [combineFlags $flags Present]
+    } else {
+      set newFlags [combineFlags $flags "" Present]
+    }
+
+    if {[string length $newFlags] == 0} then {
+      set newFlags None
+    }
+
+    object invoke -flags +NonPublic \
+        Eagle._Components.Private.ObjectOps TraceOptionFlags \
+        $newFlags
+
+    host result Ok [appendArgs \
+        "Object tracing mode is now " \
+        [expr {$enabled ? "enabled" : "disabled"}] .\n]
+  }
+
+  proc #tracenocats {} {
+    # <help>
+    # Enable tracing for all trace categories by clearing the internal lists
+    # of trace categories.
+    # </help>
+
+    object invoke -flags +NonPublic Eagle._Components.Private.TraceOps \
+        ClearTraceCategories Enabled
+
+    object invoke -flags +NonPublic Eagle._Components.Private.TraceOps \
+        ClearTraceCategories Disabled
+
+    host result Ok "Cleared all trace categories.\n"
+  }
+
+  proc #tracecats { args } {
+    # <help>
+    # Enable or disable tracing for the specified named trace categories.  If
+    # any trace categories are listed, tracing will be limited to those trace
+    # categories only.  This procedure may be called an arbitrary number of
+    # times and the additional trace categories are always additive.
+    # </help>
+
+    set enabled [object create -alias StringList]
+    set disabled [object create -alias StringList]
+
+    foreach arg $args {
+      set arg [string trim $arg]
+      set firstChar [string index $arg 0]
+
+      if {$firstChar eq "-"} then {
+        set list $disabled
+        set name [string range $arg 1 end]
+      } elseif {$firstChar eq "+"} then {
+        set list $enabled
+        set name [string range $arg 1 end]
+      } elseif {[string is alpha -strict $firstChar]} then {
+        set list $enabled
+        set name $arg
+      } else {
+        host result Continue [appendArgs \
+            "Malformed trace category modifier \"" $arg \
+            "\", must start with \"+\", \"-\", or a letter.\n"]
+
+        continue
+      }
+
+      $list Add $name
+    }
+
+    object invoke -flags +NonPublic Eagle._Components.Private.TraceOps \
+        SetTraceCategories Enabled $enabled 1
+
+    object invoke -flags +NonPublic Eagle._Components.Private.TraceOps \
+        SetTraceCategories Disabled $disabled 1
+
+    set enabledCount [$enabled Count]
+    set disabledCount [$disabled Count]
+
+    host result Ok [appendArgs \
+        "Enabled " $enabledCount " trace " \
+        [expr {$enabledCount != 1 ? "categories" : "category"}] .\n]
+
+    host result Ok [appendArgs \
+        "Disabled " $disabledCount " trace " \
+        [expr {$disabledCount != 1 ? "categories" : "category"}] .\n]
+
+    return [list enabled [object invoke -flags +NonPublic \
+        Eagle._Components.Private.TraceOps ListTraceCategories Enabled] \
+        disabled [object invoke -flags +NonPublic \
+        Eagle._Components.Private.TraceOps ListTraceCategories Disabled]]
+  }
+
+  proc #anytrace { {enabled ""} {combineFlags ""} } {
+    # <help>
+    # Enables or disables all trace priorities and types for this session.
+    # </help>
+
+    if {[string length $enabled] == 0} then {
+      set flags [object invoke -flags +NonPublic \
+          Eagle._Components.Private.TraceOps GetTracePriorities]
+
+      if {[string length $combineFlags] > 0} then {
+        set oldFlags $flags
+
+        host result Continue [appendArgs \
+            "Old trace priorities were: " $oldFlags \n]
+
+        set flags [combineFlags $flags $combineFlags]
+
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetTracePriorities \
+            $flags
+
+        set newFlags [object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps GetTracePriorities]
+
+        host result Ok [appendArgs \
+            "New trace priorities are: " $newFlags \n]
+      } else {
+        host result Ok [appendArgs \
+            "Current trace priorities are: " $flags \n]
+      }
+    } elseif {$enabled} then {
+      set flags {HasPrioritiesMask}
+
+      if {[string length $combineFlags] > 0} then {
+        set flags [combineFlags $flags $combineFlags]
+      }
+
+      object invoke -flags +NonPublic \
+          Eagle._Components.Private.TraceOps AdjustTracePriorities \
+          $flags true
+
+      host result Ok "All trace priorities and types are now enabled.\n"
+    } else {
+      object invoke -flags +NonPublic \
+          Eagle._Components.Private.TraceOps ResetTracePriorities
+
+      host result Ok "Default trace priorities and types are now enabled.\n"
+    }
+  }
+
+  proc #fulltrace { enabled {dateTime true} } {
+    # <help>
+    # Enables or disables verbose diagnostic tracing for this session.
+    # </help>
+
+    for {set count 10} {$count >= 0} {incr count -1} {
+      set flags [lrepeat $count $enabled]
+
+      if {[catch {
+        eval object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetTraceFormatFlags \
+            $flags
+
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps AdjustTracePriorities \
+            AnyFormatMask false
+      }] == 0} then {
+        break; # success, stop.
+      }
+    }
+
+    if {$enabled} then {
+      if {$dateTime} then {
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetMaximumTraceFormat
+      } else {
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetMediumHighTraceFormat
+      }
+    } else {
+      if {$dateTime} then {
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetMediumLowTraceFormat
+      } else {
+        object invoke -flags +NonPublic \
+            Eagle._Components.Private.TraceOps SetMinimumTraceFormat
+      }
+    }
+
+    host result Ok [appendArgs \
+        "Full trace mode is now " \
+        [expr {$enabled ? "enabled" : "disabled"}] " with " $count \
+        " format flags.\n"]
+  }
+
+  proc #etest {} {
+    # <help>
+    # Loads the "Eyrie.Test" package.
+    # </help>
+
+    package require Eyrie.Test
+  }
+
+  proc #garudatest {} {
+    # <help>
+    # Runs the Garuda test suite.
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    if {[info exists ::tcl_platform(machine)] && \
+        $::tcl_platform(machine) eq "amd64"} then {
+      lappend ::auto_path [file join $::env(EAGLE) bin x64 DebugDll]
+    } else {
+      lappend ::auto_path [file join $::env(EAGLE) bin Win32 DebugDll]
+    }
+
+    namespace eval ::Garuda {
+      variable methodFlags 0x40; # METHOD_PROTOCOL_V1R2
+    }
+
+    uplevel 1 [list package require Garuda]
+  }
+
+  proc #harpytest { quick isolated iis local } {
+    # <help>
+    # Runs the Harpy test suite, with and/or without plugin isolation
+    # enabled, and with or without use of a local IIS instance, and
+    # optionally skipping tests that are overly time-consuming.
+    # </help>
+
+    if {[string length $isolated] > 0} then {
+      #
+      # NOTE: Just run the Harpy tests with isolation either enabled
+      #       or disabled.
+      #
+      uplevel 1 [list \#isolation $isolated]
+      uplevel 1 [list runHarpyTestScript $quick $iis $local]
+    } else {
+      #
+      # NOTE: Run two external shells, in order, that run the Harpy
+      #       tests with isolation enabled and then disabled.
+      #
+      package require Eagle.Test
+
+      if {![info exists ::test_channel]} then {
+        set ::test_channel stdout
+      }
+
+      foreach isolated [list true false] {
+        execTestShell [list -nocapture] -isolated $isolated \
+            -preInitialize [appendArgs \" \
+                "object invoke -flags +NonPublic -objectflags \
+                +AutoFlagsEnum Interpreter.GetActive \
+                interactiveLoopFlags +NoTimeout" \"] \
+            -preInitialize [appendArgs \" \
+                "debug iqueue \{runHarpyTestScript " $quick " " \
+                $iis " " $local \}\"] \
+            -preInitialize [appendArgs \" "debug iqueue exit" \"]
+      }
+    }
+  }
+
+  proc #isolation { enable } {
+    # <help>
+    # Enables or disables plugin isolation for the current interpreter.
+    # </help>
+
+    if {[isDotNetCore]} then {
+      host result Break [appendArgs \
+          "Isolated plugins cannot be " \
+          [expr {$enable ? "enabled" : "disabled"}] \
+          ", unsupported by platform.\n"]
+
+      return
+    }
+
+    set pluginFlags [object invoke -flags +NonPublic \
+        Interpreter.GetActive PluginFlags]
+
+    if {$enable} then {
+      set pluginFlags [appendArgs $pluginFlags " +Isolated"]
+    } else {
+      set pluginFlags [appendArgs $pluginFlags " -Isolated"]
+    }
+
+    object invoke -flags +NonPublic \
+        Interpreter.GetActive PluginFlags $pluginFlags
+
+    host result Ok [appendArgs \
+        "Isolated plugins are now " \
+        [expr {$enable ? "enabled" : "disabled"}] .\n]
+  }
+
+  proc #security { enable } {
+    # <help>
+    # Enables or disables script signing policies and core script certificates
+    # for the interpreter, using the Harpy and Badge security plugins, and then
+    # continues processing arguments.  If any of the necessary plugins are
+    # unavailable, an error is generated.
+    # </help>
+
+    if {$enable} then {
+      uplevel 1 [list source enableSecurity]
+    } else {
+      uplevel 1 [list source disableSecurity]
+    }
+
+    host result Ok [appendArgs \
+        "Security is now " \
+        [expr {$enable ? "enabled" : "disabled"}] .\n]
+  }
+
+  proc #badgetest { isolated iis local } {
+    # <help>
+    # Runs all the Eagle Enterprise Edition test suites, with and/or
+    # without plugin isolation enabled, and with or without use of a
+    # local IIS instance.
+    # </help>
+
+    if {[string length $isolated] > 0} then {
+      #
+      # NOTE: Just run the Badge tests with isolation either enabled
+      #       or disabled.
+      #
+      uplevel 1 [list \#isolation $isolated]
+      uplevel 1 [list runBadgeTestScript $iis $local]
+    } else {
+      #
+      # NOTE: Run two external shells, in order, that run the Badge
+      #       tests with isolation enabled and then disabled.
+      #
+      package require Eagle.Test
+
+      if {![info exists ::test_channel]} then {
+        set ::test_channel stdout
+      }
+
+      foreach isolated [list true false] {
+        execTestShell [list -nocapture] -isolated $isolated \
+            -preInitialize [appendArgs \" \
+                "object invoke -flags +NonPublic -objectflags \
+                +AutoFlagsEnum Interpreter.GetActive \
+                interactiveLoopFlags +NoTimeout" \"] \
+            -preInitialize [appendArgs \" \
+                "debug iqueue \{runBadgeTestScript " $iis " " $local \}\"] \
+            -preInitialize [appendArgs \" "debug iqueue exit" \"]
+      }
+    }
+  }
+
+  proc #kapoksetup { iis {rootBaseUri ""} } {
+    #
+    # HACK: For the Harpy test suite, fallback to the RootBaseUri
+    #       environment variable if the "rootBaseUri" argument is
+    #       not specified.  This also allows us to share semantics
+    #       with the Harpy.Test package, which is used by the Kapok
+    #       test suite.
+    #
+    if {[string length $rootBaseUri] == 0 && \
+        [info exists ::env(RootBaseUri)]} then {
+      set rootBaseUri $::env(RootBaseUri)
+    }
+
+    if {$iis} then {
+      if {[string length $rootBaseUri] > 0} then {
+        set baseUri $rootBaseUri; set uri null
+
+        set ok [object invoke -create -alias \
+            Uri TryCreate $baseUri Absolute uri]
+
+        if {![isNonNullObjectHandle $ok] || \
+            ![$ok ToString] || ![isNonNullObjectHandle $uri]} then {
+          error [appendArgs \
+              "specified root base URI \"" $baseUri "\" is not valid"]
+        }
+
+        set useLocalHost false
+        set serverPort [$uri Port]; unset -nocomplain uri ok
+      } else {
+        set useLocalHost true
+
+        if {[info exists ::env(KAPOK_SETUP_PORT)] && \
+            [string is integer -strict $::env(KAPOK_SETUP_PORT)]} then {
+          set serverPort $::env(KAPOK_SETUP_PORT); # ???
+        } else {
+          set serverPort 11452; # IIS 7.5
+        }
+
+        if {[info exists ::tcl_platform(host)] && \
+            $::tcl_platform(host) eq "LACHRYMOSE"} then {; # HACK: Cert?
+          set schemeName https
+        } else {
+          set schemeName http
+        }
+
+        set baseUri [appendArgs $schemeName  ://localhost: $serverPort /]
+      }
+
+      set ::pingBaseUri $baseUri
+      set ::pingRelativeUri kapok/test/page.cgi?; # IIS 7.5
+      set ::provisionBaseUri $baseUri
+      set ::provisionRelativeUri kapok/service/provision.cgi?; # IIS 7.5
+      set ::renewalBaseUri $baseUri
+      set ::renewalRelativeUri kapok/certificate/renew.cgi?; # IIS 7.5
+      set ::requestBaseUri $baseUri
+      set ::requestRelativeUri kapok/certificate/request.cgi?; # IIS 7.5
+      set ::revocationBaseUri $baseUri
+      set ::revocationRelativeUri kapok/certificate/revoked.cgi?; # IIS 7.5
+      set ::supportBaseUri $baseUri
+      set ::supportRelativeUri kapok/support/check.cgi?; # IIS 7.5
+      set ::scriptBaseUri $baseUri
+      set ::scriptRelativeUri kapok/wrapper/script.cgi?; # IIS 7.5
+      set ::storageBaseUri $baseUri
+      set ::storageRelativeUri kapok/var/storage.cgi?; # IIS 7.5
+      set ::testBaseUri $baseUri
+      set ::testRelativeUri kapok/test/page.cgi?; # IIS 7.5
+
+      host result Ok [appendArgs \
+          "Kapok related tests using Internet Information Services with base URI: " \
+          $baseUri \n]
+    } else {
+      if {[string length $rootBaseUri] > 0} then {
+        set baseUri $rootBaseUri; set uri null
+
+        set ok [object invoke -create -alias \
+            Uri TryCreate $baseUri Absolute uri]
+
+        if {![isNonNullObjectHandle $ok] || \
+            ![$ok ToString] || ![isNonNullObjectHandle $uri]} then {
+          error [appendArgs \
+              "specified root base URI \"" $baseUri "\" is not valid"]
+        }
+
+        set useLocalHost false
+        set serverPort [$uri Port]; unset -nocomplain uri ok
+      } else {
+        set useLocalHost true
+
+        if {[info exists ::env(KAPOK_SETUP_PORT)] && \
+            [string is integer -strict $::env(KAPOK_SETUP_PORT)]} then {
+          set serverPort $::env(KAPOK_SETUP_PORT); # ???
+        } else {
+          set serverPort 1195; # ASP.NET Development Server
+        }
+
+        set baseUri [appendArgs http://localhost: $serverPort /]
+      }
+
+      set ::pingBaseUri $baseUri
+      set ::pingRelativeUri test/page.cgi?; # ASP.NET Development Server
+      set ::provisionBaseUri $baseUri
+      set ::provisionRelativeUri service/provision.cgi?; # ASP.NET Development Server
+      set ::renewalBaseUri $baseUri
+      set ::renewalRelativeUri certificate/renew.cgi?; # ASP.NET Development Server
+      set ::requestBaseUri $baseUri
+      set ::requestRelativeUri certificate/request.cgi?; # ASP.NET Development Server
+      set ::revocationBaseUri $baseUri
+      set ::revocationRelativeUri certificate/revoked.cgi?; # ASP.NET Development Server
+      set ::supportBaseUri $baseUri
+      set ::supportRelativeUri support/check.cgi?; # ASP.NET Development Server
+      set ::scriptBaseUri $baseUri
+      set ::scriptRelativeUri wrapper/script.cgi?; # ASP.NET Development Server
+      set ::storageBaseUri $baseUri
+      set ::storageRelativeUri var/storage.cgi?; # ASP.NET Development Server
+      set ::testBaseUri $baseUri
+      set ::testRelativeUri test/page.cgi?; # ASP.NET Development Server
+
+      host result Ok [appendArgs \
+          "Kapok related tests using ASP.NET Development Server with base URI: " \
+          $baseUri \n]
+    }
+
+    if {$useLocalHost} then {
+      set ::env(UseLocalHost) 1
+    } else {
+      unset -nocomplain ::env(UseLocalHost)
+    }
+
+    if {[string length $rootBaseUri] > 0} then {
+      set ::env(RootBaseUri) $rootBaseUri
+    } else {
+      unset -nocomplain ::env(RootBaseUri)
+    }
+
+    set ::serverPort $serverPort; set ::env(ServerPort) $serverPort
+
+    return ""
+  }
+
+  proc #kapoktest { iis {skipConstraint false} {rootBaseUri ""} } {
+    # <help>
+    # Runs the Kapok test suite.
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    #
+    # NOTE: Save the existing settings and command line arguments.
+    #
+    array set savedNo [array get ::no]
+    set savedArgv $::argv
+
+    #
+    # NOTE: Set all our custom global variables, in the environment and
+    #       otherwise, as required by the Harpy / Kapok test suites.
+    #
+    \#kapoksetup $iis $rootBaseUri
+
+    if {!$skipConstraint} then {
+      set ::no(kapok.server) 1; addConstraintToArgv kapok.server
+    }
+
+    #
+    # NOTE: Prevent our custom global variables from being removed by the
+    #       Eagle core library test suite infrastructure.
+    #
+    set ::no(cleanState) 1
+
+    try {
+      uplevel 1 [list source [file join \
+          $::env(EAGLE) Plugins Commercial Enterprise Kapok Tests all.eagle]]
+    } finally {
+      unset -nocomplain ::no(cleanState)
+
+      if {!$skipConstraint} then {
+        removeConstraintFromArgv kapok.server
+      }
+
+      unset -nocomplain ::env(ServerPort)
+      unset -nocomplain ::serverPort
+
+      unset -nocomplain ::env(RootBaseUri)
+      unset -nocomplain ::env(UseLocalHost)
+
+      unset -nocomplain ::no(kapok.server)
+
+      set ::argv $savedArgv
+      unset -nocomplain savedArgv
+
+      array set ::no [array get savedNo]
+      unset -nocomplain savedNo
+
+      unset -nocomplain ::testRelativeUri
+      unset -nocomplain ::testBaseUri
+      unset -nocomplain ::storageRelativeUri
+      unset -nocomplain ::storageBaseUri
+      unset -nocomplain ::scriptRelativeUri
+      unset -nocomplain ::scriptBaseUri
+      unset -nocomplain ::supportRelativeUri
+      unset -nocomplain ::supportBaseUri
+      unset -nocomplain ::revocationRelativeUri
+      unset -nocomplain ::revocationBaseUri
+      unset -nocomplain ::renewalRelativeUri
+      unset -nocomplain ::renewalBaseUri
+      unset -nocomplain ::provisionRelativeUri
+      unset -nocomplain ::provisionBaseUri
+      unset -nocomplain ::pingRelativeUri
+      unset -nocomplain ::pingBaseUri
+    }
+  }
+
+  proc #fastmode { enabled } {
+    # <help>
+    # Enables or disables "fast mode" for the current interpreter.  When fast
+    # mode is enabled, code breakpoints, variable watchpoints, and other things
+    # that can slow script evaluation down are disabled.
+    # </help>
+
+    set flags [object invoke \
+        -flags +NonPublic Interpreter.GetActive engineFlags]
+
+    if {$enabled} then {
+      set newFlags [combineFlags $flags "+NoBreakpoint NoWatchpoint"]
+    } else {
+      set newFlags [combineFlags $flags "-NoBreakpoint NoWatchpoint"]
+    }
+
+    object invoke -flags +NonPublic Interpreter.GetActive engineFlags $newFlags
+  }
+
+  proc #edit { fileName } {
+    # <help>
+    # Launches the configured text editor with the specified file.
+    # </help>
+
+    set editor [expr {[info exists ::env(EDITOR)] ? \
+        $::env(EDITOR) : "NOTEPAD.EXE"}]
+
+    exec -success Success $editor [file nativename $fileName] &
+  }
+
+  proc #makepass { {n 5} {mix true} {length 16} {symbols true} {alt false} } {
+    # <help>
+    # Creates a random password using the most secure entropy source currently
+    # available.
+    # </help>
+
+    if {[catch {isEagle} isEagleVar] || !$isEagleVar} then {
+      error "this only works in Eagle"
+    }
+
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    if {$alt} then {
+      set fileName [file join \
+          $::env(XDG_STARTUP_HOME) Scripts Private makepass2.eagle]
+    } else {
+      set fileName [file join \
+          $::env(XDG_STARTUP_HOME) Scripts Private makepass.eagle]
+    }
+
+    if {![file exists $fileName]} then {
+      error [appendArgs "file \"" $fileName "\" does not exist"]
+    }
+
+    set flags [object invoke -flags +NonPublic \
+        Interpreter.GetActive InterpreterFlags]
+
+    try {
+      set newFlags [concat $flags ZeroString]
+
+      object invoke -flags +NonPublic \
+          Interpreter.GetActive InterpreterFlags $newFlags
+
+      uplevel 1 [list source $fileName]
+
+      for {set i 0} {$i < $n + 1} {incr i} {
+        set pass($i) [::Cipher1::newGeneratePassword $length $symbols]
+        if {!$mix} then {
+          host result Ok [appendArgs $pass($i) \n]
+        }
+      }
+
+      if {$mix} then {
+        catch {random replace}; # use "secure" RNG.
+        set pass(mixed) ""
+        set m 3; # TODO: *MAGIC* Really, why?
+
+        for {set i 0} {$i < $n} {incr i} {
+          set j [expr {abs(random() % ([string length $pass($i)] - $m))}]
+          set k [expr {$j + $m - 1}]
+          append pass(mixed) [string range $pass($i) $j $k]
+        }
+
+        #
+        # NOTE: Account for length being more than (M * N).
+        #
+        while {[string length $pass(mixed)] < $length} {
+          set j [expr {abs(random() % ([string length $pass($n)] - $m))}]
+          set k [expr {$j + $m - 1}]
+          append pass(mixed) [string range $pass($n) $j $k]
+        }
+
+        #
+        # NOTE: Account for length not being evenly divisible by M.
+        #
+        if {$length > 0 && [string length $pass(mixed)] > $length} then {
+          set pass(mixed) [string range $pass(mixed) 0 [expr {$length - 1}]]
+        }
+
+        #
+        # NOTE: Display the final result.
+        #
+        if {[string length $pass(mixed)] > 0} then {
+          host result Ok [appendArgs $pass(mixed) \n]
+        } else {
+          host result Error "no password was generated"
+        }
+      }
+
+      unset -remove -purge -maybezerostring -- pass; debug collect
+    } finally {
+      object invoke -flags +NonPublic \
+          Interpreter.GetActive InterpreterFlags $flags
+    }
+  }
+
+  proc #fossil { args } {
+    # <help>
+    # Execute the specified Fossil SCM command.
+    # </help>
+
+    return [eval exec -commandline -debug -- fossil.exe $args]
+  }
+
+  #
+  # CREATE TABLE t1(x, y);
+  # INSERT INTO t1(x, y) VALUES(1, 2);
+  # INSERT INTO t1(x, y) VALUES(2423, 3837);
+  # INSERT INTO t1(x, y) VALUES(NULL, 'foo');
+  # INSERT INTO t1(x, y) VALUES('barfoo', NULL);
+  # SELECT * FROM t1;
+  # SELECT *, typeof(x), typeof(y) FROM t1;
+  #
+  proc #sqlite { {fileName :memory:} } {
+    # <help>
+    # Enters a special interactive loop that accepts only SQL statements to be
+    # executed against the specified (or default) SQLite database.  This now
+    # requires Eagle beta 35 or later.
+    # </help>
+
+    set connection ""
+
+    try {
+      set connection [sql open -type SQLite [subst {Data Source=$fileName;}]]
+
+      if {$fileName eq ":memory:"} then {
+        host write "WARNING: Connected to a "
+        host result Error "transient in-memory database"
+        host write . true
+      }
+
+      set savedCancelViaConsole [object invoke -create Int32 Parse [object \
+          invoke -flags +NonPublic Interpreter cancelViaConsole.GetValue 0]]
+
+      set one [object invoke -create Int32 Parse 1]
+
+      object invoke -flags +NonPublic Interpreter \
+          cancelViaConsole.SetValue $one 0
+
+      try {
+        while {true} {
+          host write "sqlite> "
+
+          if {[catch {host readline} line] == 0} then {
+            set line [string trim $line]
+          } else {
+            host write "" true
+            continue; # NOTE: Input canceled, next.
+          }
+
+          if {[string length $line] == 0} then {
+            continue; # NOTE: Empty line, skip.
+          }
+
+          if {[string index $line 0] eq "#"} then {
+            continue; # NOTE: Comment line, skip.
+          }
+
+          if {[string tolower $line] in [list .exit exit .quit quit]} then {
+            break; # NOTE: Exit SQLite REPL loop.
+          }
+
+          if {[catch {
+            sql execute -execute reader $connection $line
+          } error] == 0} then {
+            unset -nocomplain maxLength
+
+            for {set i 1} {$i <= $rows(count)} {incr i} {
+              for {set j 0} {$j < [llength $rows(names)]} {incr j} {
+                set name [lindex $rows(names) $j]
+
+                if {![info exists maxLength($name)]} then {
+                  set maxLength($name) [string length $name]
+                }
+
+                set value [getRowColumnValue rows $i $name <NULL>]
+                set length [string length $value]
+
+                if {$length > $maxLength($name)} then {
+                  set maxLength($name) $length
+                }
+              }
+            }
+
+            if {[llength $rows(names)] > 0} then {
+              for {set j 0} {$j < [llength $rows(names)]} {incr j} {
+                set name [lindex $rows(names) $j]
+
+                if {$j > 0} then {
+                  host result Ok \t
+                }
+
+                host result Ok [format \
+                    [appendArgs % [expr {[info exists maxLength($name)] ? \
+                    $maxLength($name) : ""}] s] $name]
+              }
+
+              host result Ok \n
+
+              for {set j 0} {$j < [llength $rows(names)]} {incr j} {
+                set name [lindex $rows(names) $j]
+
+                if {$j > 0} then {
+                  host result Ok \t
+                }
+
+                host result Ok [string repeat - \
+                    [expr {[info exists maxLength($name)] ? \
+                    $maxLength($name) : [string length $name]}]]
+              }
+
+              host result Ok \n
+            }
+
+            if {$rows(count) > 0} then {
+              for {set i 1} {$i <= $rows(count)} {incr i} {
+                for {set j 0} {$j < [llength $rows(names)]} {incr j} {
+                  set name [lindex $rows(names) $j]
+                  set value [getRowColumnValue rows $i $name <NULL>]
+
+                  if {$j > 0} then {
+                    host result Ok \t
+                  }
+
+                  host result Ok [format \
+                      [appendArgs % [expr {[info exists maxLength($name)] ? \
+                      $maxLength($name) : ""}] s] $value]
+                }
+
+                host result Ok \n
+              }
+            }
+          } else {
+            host result Error [appendArgs $error \n]
+          }
+        }
+      } finally {
+        object invoke -flags +NonPublic Interpreter \
+            cancelViaConsole.SetValue $savedCancelViaConsole 0
+
+        unset savedCancelViaConsole
+      }
+    } finally {
+      if {[string length $connection] > 0} then {
+        sql close $connection
+        unset connection
+      }
+    }
+  }
+}
+

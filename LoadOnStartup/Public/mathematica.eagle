@@ -1,0 +1,106 @@
+###############################################################################
+#
+# mathematica.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Mathematica Support
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+# WARNING: Do not call any of these procedures unless you know exactly how
+#          they work and are willing to accept broken script compatibility
+#          later.  You have been warned.
+#
+namespace eval ::Eagle {
+  proc getSubKeyNames { keyName } {
+    set rootKey ""; set subKey ""
+
+    try {
+      #
+      # HACK: For now, always use the HKEY_LOCAL_MACHINE
+      #       root key.
+      #
+      set rootKey [object invoke -alias \
+          Microsoft.Win32.Registry LocalMachine]
+
+      set subKey [$rootKey -alias OpenSubKey $keyName]
+
+      return [$subKey GetSubKeyNames]
+    } finally {
+      if {[string length $subKey] > 0} then {
+        unset -nocomplain subKey; # dispose
+      }
+
+      if {[string length $rootKey] > 0} then {
+        unset -nocomplain rootKey; # dispose
+      }
+    }
+  }
+
+  proc mathematica { expr } {
+    if {[isWindows]} then {
+      set baseKeyName {Software\Wolfram Research\Installations}
+      set keyName [lindex [getSubKeyNames $baseKeyName] 0]
+
+      set directory [file dirname [object invoke \
+          Microsoft.Win32.Registry GetValue [appendArgs \
+          HKEY_LOCAL_MACHINE\\ $baseKeyName \\ $keyName] \
+          ExecutablePath null]]
+
+      set fileName [file join $directory SystemFiles \
+          Links NETLink Wolfram.NETLink.dll]
+
+      set assembly [object load -import -loadtype file $fileName]
+    } else {
+      #
+      # TODO: Possibly use assembly file name for non-Windows
+      #       platforms.  How can a fully qualified file name
+      #       for this assembly be determined?
+      #
+      set assembly [object load -import Wolfram.NETLink]
+    }
+
+    try {
+      set kernel [object invoke \
+          -alias MathLinkFactory CreateKernelLink]
+
+      $kernel WaitAndDiscardAnswer
+
+      set result [$kernel -create EvaluateToOutputForm $expr 0]
+
+      if {[isNonNullObjectHandle $result]} then {
+        return [getStringFromObjectHandle $result]
+      } else {
+        set error [$kernel -create LastError]
+
+        if {[isNonNullObjectHandle $error]} then {
+          error [appendArgs \
+              "Mathematica error: " \
+              [getStringFromObjectHandle $error]]
+        } else {
+          error "Mathematica error: <unknown>"
+        }
+      }
+    } finally {
+      if {[info exists kernel]} then {
+        $kernel Close; unset kernel
+      }
+    }
+  }
+
+  package provide Eagle.Mathematica \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+
