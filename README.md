@@ -15,8 +15,8 @@ It provides optional convenience layers, test hooks, and integrations with **Har
 * [Directory phases](#directory-phases-from-settingsstartup-settings-fileseagle)
 * [Root scripts](#root-scripts)
 * [LoadOnStartup/Public scripts](#loadonstartuppublic-scripts)
+* [LoadOnStartup/Public/WatchCat](#watchcat)
 * [LoadOnStartup/Private (site-specific)](#loadonstartupprivate-site-specific)
-* [WatchCat (optional)](#watchcat-optional)
 * [Settings](#settings)
 * [Scripts/Public/badgeTest.eagle](#scriptspublicbadgetesteagle)
 * [checkUpdateZeusHook.eagle](#checkupdatezeushookeagle)
@@ -216,18 +216,18 @@ Provides `setupForChat` and `getDateTimeFormatForChat`; configures HotKey, Secre
 
 ---
 
+## LoadOnStartup/Public/WatchCat
+
+`watchCat.eagle` enables live monitoring and log collection for test runs.
+
+---
+
 ## LoadOnStartup/Private (site-specific)
 
 * `auth.eagle` - authentication credentials.
 * `intExtCmds_private.eagle` - additional local commands.
 
 (These are referenced but not part of this public repo.)
-
----
-
-## LoadOnStartup/Public/WatchCat
-
-`watchCat.eagle` enables live monitoring and log collection for test runs.
 
 ---
 
