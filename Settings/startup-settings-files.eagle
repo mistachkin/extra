@@ -38,6 +38,7 @@ apply [list [list script] {
     helpers.eagle
     history.eagle
     intExtCmds.eagle
+    intExtCmds_licensing.eagle
     secrets.eagle
     sms.eagle
   }
@@ -48,7 +49,6 @@ apply [list [list script] {
 
   set fileNamesOnly(private) {
     auth.eagle
-    intExtCmds_private.eagle
   }
 
   set fileNamesOnly(settings) {

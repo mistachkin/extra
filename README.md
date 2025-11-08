@@ -96,12 +96,12 @@ All flags may be defined either in the `::no(...)` array or as environment varia
 
 ## Directory phases (from `Settings/startup-settings-files.eagle`)
 
-| Phase      | Directory               | Typical contents                                                                                                     |
-| ---------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `public`   | `LoadOnStartup/Public`  | `backcompat.eagle`, `helpers.eagle`, `history.eagle`, `intExtCmds.eagle`, `secrets.eagle`, `sms.eagle`, `chat.eagle` |
-| `watchCat` | `WatchCat`              | `watchCat.eagle`                                                                                                     |
-| `private`  | `LoadOnStartup/Private` | `auth.eagle`, `intExtCmds_private.eagle` (site-specific)                                                             |
-| `settings` | `Settings`              | `startup-settings.eagle`                                                                                             |
+| Phase      | Directory               | Typical contents                                                                                                                                   |
+| ---------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public`   | `LoadOnStartup/Public`  | `backcompat.eagle`, `helpers.eagle`, `history.eagle`, `intExtCmds.eagle`, `intExtCmds_licensing.eagle`, `secrets.eagle`, `sms.eagle`, `chat.eagle` |
+| `watchCat` | `WatchCat`              | `watchCat.eagle`                                                                                                                                   |
+| `private`  | `LoadOnStartup/Private` | `auth.eagle` (site-specific)                                                                                                                       |
+| `settings` | `Settings`              | `startup-settings.eagle`                                                                                                                           |
 
 ---
 
@@ -225,7 +225,6 @@ Provides `setupForChat` and `getDateTimeFormatForChat`; configures HotKey, Secre
 ## LoadOnStartup/Private (site-specific)
 
 * `auth.eagle` - authentication credentials.
-* `intExtCmds_private.eagle` - additional local commands.
 
 (These are referenced but not part of this public repo.)
 

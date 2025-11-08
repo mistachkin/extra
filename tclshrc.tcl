@@ -30,6 +30,15 @@ namespace eval :: {
         set path [file normalize [file dirname $script]]
 
         #
+        # NOTE: Unless forbidden from doing so, add the public startup
+        #       script packages to the auto-path.
+        #
+        if {![info exists ::no(NoLoadOnStartupPublicAutoPath)] && \
+            ![info exists ::env(NoLoadOnStartupPublicAutoPath)]} then {
+          lappend ::auto_path [file join $path LoadOnStartup Public]
+        }
+
+        #
         # HACK: Should be quiet for things like the Demo test suite.
         #       Since the "$::argv" script variable can be modified
         #       by the shell command line processing, use the (new)

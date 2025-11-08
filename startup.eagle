@@ -40,7 +40,7 @@ if {![interp issafe] && ![interp issdk]} then {
       set ::no(NoLicensingPackageUnknownError) 1
 
       set fileName [file join [file dirname \
-          [info script]] LoadOnStartup Private licensing.eagle]
+          [info script]] LoadOnStartup Public licensing.eagle]
 
       if {[file exists $fileName]} then {
         uplevel #0 [list source $fileName]

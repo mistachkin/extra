@@ -34,6 +34,9 @@ package ifneeded Eagle.Execute.Pipes 1.0 \
 package ifneeded Eagle.Sms 1.0 \
     [list source -library true -- [file join $dir sms.eagle]]
 
+package ifneeded Eagle.Licensing 1.0 \
+    [list source -library true -- [file join $dir licensing.eagle]]
+
 package ifneeded Eagle.Mathematica 1.0 \
     [list source -library true -- [file join $dir mathematica.eagle]]
 

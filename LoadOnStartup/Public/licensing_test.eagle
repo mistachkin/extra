@@ -1,0 +1,99 @@
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "enable personalLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::personalLicenses "" [file normalize $::env(XDG_STARTUP_HOME)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::personalLicenses main [file normalize $::env(XDG_STARTUP_HOME)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::personalLicenses Zeus.Enterprise [file normalize $::env(XDG_STARTUP_HOME)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "disable personalLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::personalLicenses "" [file normalize $::env(XDG_STARTUP_HOME)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::personalLicenses main [file normalize $::env(XDG_STARTUP_HOME)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::personalLicenses Zeus.Enterprise [file normalize $::env(XDG_STARTUP_HOME)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "enable developmentLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::developmentLicenses "" [file normalize $::env(EAGLE)] 1 0 0] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::developmentLicenses main [file normalize $::env(EAGLE)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::developmentLicenses Zeus.Enterprise [file normalize $::env(EAGLE)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "disable developmentLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::developmentLicenses "" [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::developmentLicenses main [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::developmentLicenses Zeus.Enterprise [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "enable encryptedDevelopmentLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::encryptedDevelopmentLicenses "" [file normalize $::env(EAGLE)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::encryptedDevelopmentLicenses main [file normalize $::env(EAGLE)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::encryptedDevelopmentLicenses Zeus.Enterprise [file normalize $::env(EAGLE)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "disable encryptedDevelopmentLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::encryptedDevelopmentLicenses "" [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::encryptedDevelopmentLicenses main [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::encryptedDevelopmentLicenses Zeus.Enterprise [file normalize $::env(EAGLE)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "enable trialLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::trialLicenses "" [file normalize $::env(TRIAL_CERTIFICATES)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::trialLicenses main [file normalize $::env(TRIAL_CERTIFICATES)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::trialLicenses Zeus.Enterprise [file normalize $::env(TRIAL_CERTIFICATES)] 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "disable trialLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::trialLicenses "" [file normalize $::env(TRIAL_CERTIFICATES)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::trialLicenses main [file normalize $::env(TRIAL_CERTIFICATES)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::trialLicenses Zeus.Enterprise [file normalize $::env(TRIAL_CERTIFICATES)] 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "enable legacyLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::legacyLicenses "" "" 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::legacyLicenses main "" 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::legacyLicenses Zeus.Enterprise "" 1 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+
+puts stdout ""
+puts stdout [string repeat = 80]
+puts stdout "disable legacyLicenses"
+puts stdout [string repeat = 80]
+puts stdout ""
+
+foreach x [::Licensing::legacyLicenses "" "" 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::legacyLicenses main "" 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}
+foreach x [::Licensing::legacyLicenses Zeus.Enterprise "" 0 0 1] {puts stdout [appendArgs \t [lindex $x 0] " ==>\n\t\t" [file tail [lindex $x end]] \n]}

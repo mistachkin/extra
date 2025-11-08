@@ -1,0 +1,141 @@
+###############################################################################
+#
+# intExtCmds_licensing.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Shell Interactive Extension Commands (Licensing)
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: This script is designed to be evaluated in the global namespace only.
+#       Native Tcl does this by default (?); however, Eagle does not.
+#
+namespace eval :: {
+  proc #usedevcerts { enable {quiet false} } {
+    # <help>
+    # Enables or disables use of all Eagle Enterprise Edition development
+    # license certificates.  All certificate files must be present at the
+    # path "[file join $env(EAGLE) Plugins Commercial Enterprise]".
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    lappend ::auto_path [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Private]
+
+    package require Eagle.Licensing
+
+    return [::Licensing::developmentLicenses \
+        "" [file normalize $::env(EAGLE)] $enable $quiet]
+  }
+
+  proc #usetrialcerts { enable {quiet false} } {
+    # <help>
+    # Enables or disables use of all trial Eagle Enterprise Edition license
+    # certificates.  All the certificate files must be present at the path
+    # "${::env(TRIAL_CERTIFICATES)}/${plugin}/trial-certificate.xml", where
+    # ${plugin} must be the name of the associated Eagle plugin.
+    # </help>
+
+    if {![info exists ::env(TRIAL_CERTIFICATES)]} then {
+      error "the TRIAL_CERTIFICATES environment variable is not set"
+    }
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    lappend ::auto_path [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Private]
+
+    package require Eagle.Licensing
+
+    return [::Licensing::trialLicenses \
+        "" [file normalize $::env(TRIAL_CERTIFICATES)] $enable $quiet]
+  }
+
+  proc #useenccerts { enable {quiet false} } {
+    # <help>
+    # Enables or disables use of all Eagle Enterprise Edition encrypted
+    # development license certificates.  All certificate files must be
+    # present at the path "[file join $env(EAGLE) Plugins Commercial
+    # Enterprise]".
+    # </help>
+
+    if {![info exists ::env(EAGLE)]} then {
+      error "the EAGLE environment variable is not set"
+    }
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    lappend ::auto_path [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Private]
+
+    package require Eagle.Licensing
+
+    return [::Licensing::encryptedDevelopmentLicenses \
+        "" [file normalize $::env(EAGLE)] $enable $quiet]
+  }
+
+  proc #usemycerts { enable {quiet false} } {
+    # <help>
+    # Enables or disables use of all personal Eagle Enterprise Edition license
+    # certificates associated with the current user.  All the certificate files
+    # must be present at the path "~/[file tail [info user]]-${plugin}.xml",
+    # where ${plugin} must be the name of the associated Eagle plugin and the
+    # file at the path "~/[file tail [info user]].xml" must contain the license
+    # certificate for the Harpy / Badge plugins.
+    # </help>
+
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the XDG_STARTUP_HOME environment variable is not set"
+    }
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    lappend ::auto_path [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Private]
+
+    package require Eagle.Licensing
+
+    return [::Licensing::personalLicenses \
+        "" [file normalize $::env(XDG_STARTUP_HOME)] $enable $quiet]
+  }
+
+  proc #legacycerts { enable {quiet false} } {
+    # <help>
+    # Enables or disables use of the legacy certificate environment variables.
+    # This is only useful for Beta 45 and lower.
+    # </help>
+
+    if {![info exists ::env(SCRATCH_ROOT)]} then {
+      error "the SCRATCH_ROOT environment variable is not set"
+    }
+
+    lappend ::auto_path [file join \
+        $::env(SCRATCH_ROOT) eagle startup LoadOnStartup Private]
+
+    package require Eagle.Licensing
+
+    return [::Licensing::legacyLicenses "" "" $enable $quiet]
+  }
+}
+

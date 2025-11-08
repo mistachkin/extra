@@ -1,0 +1,949 @@
+###############################################################################
+#
+# licensing.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle Enterprise Edition Licensing Package
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Licensing {
+  proc getPrimaryPackageNames { {basicOnly false} } {
+    # <help>
+    # This procedure returns the list of primary package names that can
+    # be handled by this module.  For our purposes, "primary" means that
+    # the package is part of Harpy.  Those packages are somewhat special,
+    # especially the "Licensing.Core" package, because other packages may
+    # rely upon them to verify their own license certificates.
+    # </help>
+
+    set result [list]
+
+    lappend result Security.Core
+    lappend result Licensing.Core
+
+    if {!$basicOnly} then {
+      lappend result Licensing.Standard
+      lappend result Licensing.Enterprise
+    }
+
+    lappend result Security.Certificates
+
+    if {!$basicOnly} then {
+      lappend result Badge.Enterprise
+    }
+
+    return $result
+  }
+
+  proc getAllPackageNames { {includePrimary true} } {
+    # <help>
+    # This procedure returns the list of all package names that can
+    # be handled by this module.
+    # </help>
+
+    set result [list]
+
+    if {$includePrimary} then {
+      eval lappend result [getPrimaryPackageNames]
+    }
+
+    lappend result Kapok.Enterprise
+    lappend result ASP.certificate_renew_cgi
+    lappend result ASP.certificate_request_cgi
+    lappend result ASP.certificate_revoked_cgi
+    lappend result ASP.service_provision_cgi
+    lappend result ASP.support_check_cgi
+    lappend result ASP.var_storage_cgi
+    lappend result ASP.wrapper_script_cgi
+
+    lappend result Zeus.Enterprise
+    lappend result Demo.Enterprise
+    lappend result HotKey.Enterprise
+    lappend result Featherlight.Environment
+
+    lappend result AlphaCipher.Cryptography
+    lappend result KeyPair.Generator
+
+    return $result
+  }
+
+  proc maybeTransformPath { type path } {
+    # <help>
+    # This procedure returns a path compatible with the path specified by
+    # the caller.  This procedure may do nothing and return the original
+    # path specified by the caller verbatim.  Alternatively, this
+    # procedure may normalize, otherwise mutate, or completely ignore the
+    # original path specified by the caller.
+    # </help>
+
+    return [file normalize $path]
+  }
+
+  proc getLegacyLicensePrefix {} {
+    # <help>
+    # This procedure attempts to determine the naming prefix that was
+    # used for historical license certificate environment variables.
+    # </help>
+
+    if {[info exists ::env(LegacyLicensePrefix)]} then {
+      set value $::env(LegacyLicensePrefix)
+
+      if {[string length $value] > 0} then {
+        return $value
+      }
+    }
+
+    return Legacy
+  }
+
+  proc getPluginNameOnly {
+          name legacyOnly pluginVarName suffixVarName } {
+    # <help>
+    # This procedure attempts to extract the plugin and suffix names
+    # from the specified string.
+    # </help>
+
+    set legacyPrefix [getLegacyLicensePrefix]
+
+    if {[string length $legacyOnly] > 0} then {
+      if {$legacyOnly} then {
+        set pattern(1) [appendArgs \
+            {^(?:} $legacyPrefix {)_Certificate$}]
+
+        set pattern(2) [appendArgs \
+            {^(?:} $legacyPrefix {)_(.*)_Certificate$}]
+      } else {
+        set pattern(1) {^(?:Override)_Certificate$}
+        set pattern(2) {^(?:Override)_(.*)_Certificate$}
+      }
+    } else {
+      set pattern(1) [appendArgs \
+          {^(?:Override|} $legacyPrefix {)_Certificate$}]
+
+      set pattern(2) [appendArgs \
+          {^(?:Override|} $legacyPrefix {)_(.*)_Certificate$}]
+    }
+
+    upvar 1 $pluginVarName plugin_name
+    upvar 1 $suffixVarName suffix_name
+
+    if {[regexp -- $pattern(1) $name]} then {
+      set plugin_name Licensing_Core
+      set suffix_name _Certificate
+
+      return true
+    }
+
+    if {[regexp -- $pattern(2) $name dummy plugin_name]} then {
+      set suffix_name [appendArgs $plugin_name _Certificate]
+
+      return true
+    }
+
+    return false
+  }
+
+  proc installPackageUnknown { interpreter {flags true} } {
+    # <help>
+    # This procedure attempts to install our [package unknown] handler.
+    # </help>
+
+    variable savedInterpreterFlags
+    variable savedPackageUnknown
+
+    set result [list]
+
+    ###########################################################################
+
+    if {$flags && ![info exists savedInterpreterFlags] && \
+        [isNonNullObjectHandle $interpreter]} then {
+      #
+      # NOTE: The NoPackageUnknown interpreter flag is stupid,
+      #       remove it.  The fallback functionality provided
+      #       by [package require] __must__ be well tested;
+      #       therefore, keep this flag off on all interactive
+      #       development machines.
+      #
+      set savedInterpreterFlags \
+          [$interpreter -flags +NonPublic InterpreterFlags]
+
+      $interpreter -flags +NonPublic InterpreterFlags \
+          [combineFlags $savedInterpreterFlags -NoPackageUnknown]
+
+      lappend result [list flags $savedInterpreterFlags]
+    }
+
+    ###########################################################################
+
+    if {![info exists savedPackageUnknown]} then {
+      #
+      # NOTE: Install for the [package unknown] handler from
+      #       this module, saving the previous one for later
+      #       restoration.
+      #
+      set savedPackageUnknown [package unknown]
+      package unknown ::Licensing::packageUnknown
+      lappend result [list unknown $savedPackageUnknown]
+    }
+
+    ###########################################################################
+
+    return $result
+  }
+
+  proc uninstallPackageUnknown { interpreter {flags true} } {
+    # <help>
+    # This procedure attempts to uninstall our [package unknown] handler.
+    # </help>
+
+    variable savedInterpreterFlags
+    variable savedPackageUnknown
+
+    set result [list]
+
+    ###########################################################################
+
+    if {$flags && [info exists savedInterpreterFlags] && \
+        [isNonNullObjectHandle $interpreter]} then {
+      set oldInterpreterFlags \
+          [$interpreter -flags +NonPublic InterpreterFlags]
+
+      $interpreter -flags +NonPublic InterpreterFlags \
+          $savedInterpreterFlags
+
+      unset savedInterpreterFlags
+      lappend result [list flags $oldInterpreterFlags]
+    }
+
+    ###########################################################################
+
+    if {[info exists savedPackageUnknown]} then {
+      set oldPackageUnknown [package unknown]
+      package unknown $savedPackageUnknown
+      unset savedPackageUnknown
+      lappend result [list unknown $oldPackageUnknown]
+    }
+
+    ###########################################################################
+
+    return $result
+  }
+
+  proc packageUnknown { name {version ""} } {; # COMPAT: Tcl
+    # <help>
+    # This procedure is designed to be used with the [package unknown]
+    # sub-command of an interpreter.  When invoked, it will attempt to
+    # determine if the package specified requires one or more licenses
+    # it knows about.  If so, it will attempt to provide all necessary
+    # license(s).  To enable use of this procedure, use commands like
+    # the following: [debug iqueue {#iflags -NoPackageUnknown}] and
+    # [package unknown ::Licensing::packageUnknown].
+    # </help>
+
+    #
+    # NOTE: Skip all custom handling and do nothing if the caller has
+    #       forbidden us.
+    #
+    if {![info exists ::no(NoLicensingPackageUnknown)] && \
+        ![info exists ::env(NoLicensingPackageUnknown)]} then {
+      #
+      # NOTE: Does this module even know about the specified package?
+      #
+      if {$name in [getAllPackageNames]} then {
+        #
+        # NOTE: This should resolve to the name of this procedure, even
+        #       if it has been renamed.
+        #
+        set level [lindex [info level [info level]] 0]
+
+        #
+        # NOTE: Is specified package one that requires a Harpy license
+        #       certificate?  If not, handle the Harpy license as well;
+        #       otherwise, the other package may fail to load due to
+        #       its inability to use the Harpy SDK to verify its own
+        #       license.
+        #
+        if {$name ne [getPrimaryPackageNames]} then {
+          maybeFindAndUseLicenses $level Licensing.Core; # Harpy
+        }
+
+        #
+        # NOTE: Attempt to provide license certificate for the package(s)
+        #       specified.  This may end up doing nothing, e.g. it cannot
+        #       find any license certificates in "well-known" locations.
+        #
+        maybeFindAndUseLicenses $level $name; # ????
+      } else {
+        set message [appendArgs \
+            "package \"" $name "\" has unknown licensing"]
+
+        host result Error [appendArgs $message \n]
+
+        if {![info exists ::no(NoLicensingPackageUnknownError)] && \
+            ![info exists ::env(NoLicensingPackageUnknownError)]} then {
+          error $message
+        }
+      }
+    }
+
+    return ""
+  }
+
+  proc maybeFindAndUseLicenses {
+          contextName packageName {enable true} {all false} {replace false}
+          {quiet false} args } {; # HOOK
+    # <help>
+    # This procedure is designed to be used from anywhere necessary in order
+    # to attempt to provide one or more license certificates for the various
+    # Eagle Enterprise Edition packages.  Non-zero will be returned only if
+    # something is actually done.
+    # </help>
+
+    set result 0
+
+    ###########################################################################
+
+    if {$packageName in [getPrimaryPackageNames]} then {
+      #
+      # HACK: The value "main" is used here to mean any packaged
+      #       plugin that requires a (Harpy) license certificate
+      #       signed by the Harpy assembly public key.
+      #
+      set packageName main
+    }
+
+    ###########################################################################
+
+    if {[info exists ::env(XDG_STARTUP_HOME)]} then {
+      set path [maybeTransformPath directory $::env(XDG_STARTUP_HOME)]
+
+      set list [personalLicenses \
+          $packageName $path true $replace $quiet]
+
+      set length [llength $list]
+
+      if {$length > 0} then {
+        incr result $length
+
+        if {!$all} then {
+          return $result
+        }
+      }
+    }
+
+    ###########################################################################
+
+    if {[info exists ::env(EAGLE)]} then {
+      set path [maybeTransformPath directory $::env(EAGLE)]
+
+      set list [developmentLicenses \
+          $packageName $path true $replace $quiet]
+
+      set length [llength $list]
+
+      if {$length > 0} then {
+        incr result $length
+
+        if {!$all} then {
+          return $result
+        }
+      }
+    }
+
+    ###########################################################################
+
+    if {[info exists ::env(EAGLE)]} then {
+      set path [maybeTransformPath directory $::env(EAGLE)]
+
+      set list [encryptedDevelopmentLicenses \
+          $packageName $path true $replace $quiet]
+
+      set length [llength $list]
+
+      if {$length > 0} then {
+        incr result $length
+
+        if {!$all} then {
+          return $result
+        }
+      }
+    }
+
+    ###########################################################################
+
+    if {[info exists ::env(TRIAL_CERTIFICATES)]} then {
+      set path [maybeTransformPath directory $::env(TRIAL_CERTIFICATES)]
+
+      set list [trialLicenses \
+          $packageName $path true $replace $quiet]
+
+      set length [llength $list]
+
+      if {$length > 0} then {
+        incr result $length
+
+        if {!$all} then {
+          return $result
+        }
+      }
+    }
+
+    ###########################################################################
+
+    return $result
+  }
+
+  proc personalLicenses {
+          packageName path enable {replace false} {quiet false} } {
+    # <help>
+    # This procedure attempts to make use of available personal license
+    # certificates for the specified package(s).  This procedure may do
+    # nothing.
+    # </help>
+
+    set result [list]
+    set level [lindex [info level [info level]] 0]
+    set match_plugin_name [string map [list . _] $packageName]
+    set directory [file join $path Certificates License]
+
+    if {$enable} then {
+      set userName [file tail [string map [list \\ /] [info user]]]
+
+      if {[string length $match_plugin_name] == 0 || \
+          $match_plugin_name eq "main"} then {
+        set fileName [maybeTransformPath file \
+            [file join $directory [appendArgs $userName .xml]]]
+
+        if {[file exists $fileName]} then {
+          set name Override_Certificate
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set plugin_name <main>
+            set ::env(Override_Certificate) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled personal certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+
+      foreach fileName [glob -nocomplain [file join \
+          $directory [appendArgs $userName -*.xml]]] {
+        set plugin_name [lindex \
+            [split [file rootname [file tail $fileName]] -] end]
+
+        if {[string length $match_plugin_name] > 0 && \
+            $plugin_name ne $match_plugin_name} then {
+          continue
+        }
+
+        #
+        # HACK: Skip any certificates with a lower case "plugin name"
+        #       portion of the file name.
+        #
+        if {[string is upper [string index $plugin_name 0]]} then {
+          set name [appendArgs \
+              Override_ $plugin_name _Certificate]
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set ::env($name) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled personal certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+    } else {
+      foreach name [array names ::env Override_*_Certificate] {
+        if {[info exists ::env($name)] && \
+            [getPluginNameOnly $name "" plugin_name suffix_name]} then {
+          if {[string map [list _ .] $plugin_name] ni \
+              [getAllPackageNames]} then {
+            continue
+          }
+
+          if {[string length $match_plugin_name] > 0 && \
+              $plugin_name ne $match_plugin_name} then {
+            continue
+          }
+
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled personal certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+
+      set name Override_Certificate
+
+      if {[info exists ::env($name)]} then {
+        if {[string length $match_plugin_name] == 0 || \
+            $match_plugin_name eq "main"} then {
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            set plugin_name <main>
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled personal certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+    }
+
+    return $result
+  }
+
+  proc developmentLicenses {
+          packageName path enable {replace false} {quiet false} } {
+    # <help>
+    # This procedure attempts to make use of available development license
+    # certificates for the specified package(s).  This procedure may do
+    # nothing.
+    # </help>
+
+    set result [list]
+    set level [lindex [info level [info level]] 0]
+    set match_plugin_name [string map [list . _] $packageName]
+    set directory [file join $path Plugins Commercial Enterprise]
+
+    if {$enable} then {
+      if {[string length $match_plugin_name] == 0 || \
+          $match_plugin_name eq "main"} then {
+        set fileName [maybeTransformPath file \
+            [file join $directory certificate.xml]]
+
+        if {[file exists $fileName]} then {
+          set name Override_Certificate
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set plugin_name <main>
+            set ::env($name) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled development certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+
+      foreach fileName [glob -nocomplain [file join \
+          $directory [appendArgs certificate -*.xml]]] {
+        set plugin_name [lindex \
+            [split [file rootname [file tail $fileName]] -] end]
+
+        if {[string map [list _ .] $plugin_name] ni \
+            [getAllPackageNames]} then {
+          continue
+        }
+
+        if {[string length $match_plugin_name] > 0 && \
+            $plugin_name ne $match_plugin_name} then {
+          continue
+        }
+
+        set name [appendArgs \
+            Override_ $plugin_name _Certificate]
+
+        if {$replace || ![info exists ::env($name)]} then {
+          set ::env($name) $fileName
+          lappend result [list $plugin_name $fileName]
+
+          if {!$quiet} then {
+            host result Ok [appendArgs \
+                $level ": Enabled development certificate \"" \
+                $fileName "\" for plugin \"" $plugin_name \".\n]
+          }
+        }
+      }
+    } else {
+      foreach name [array names ::env Override_*_Certificate] {
+        if {[info exists ::env($name)] && \
+            [getPluginNameOnly $name "" plugin_name suffix_name]} then {
+          if {[string map [list _ .] $plugin_name] ni \
+              [getAllPackageNames]} then {
+            continue
+          }
+
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled development certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+
+      set name Override_Certificate
+
+      if {[info exists ::env($name)]} then {
+        if {[string length $match_plugin_name] == 0 || \
+            $match_plugin_name eq "main"} then {
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            set plugin_name <main>
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled development certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+    }
+
+    return $result
+  }
+
+  proc encryptedDevelopmentLicenses {
+          packageName path enable {replace false} {quiet false} } {
+    # <help>
+    # This procedure attempts to make use of available encrypted development
+    # license certificates for the specified package(s).  This procedure may
+    # do nothing.
+    # </help>
+
+    set result [list]
+    set level [lindex [info level [info level]] 0]
+    set match_plugin_name [string map [list . _] $packageName]
+    set directory [file join $path Plugins Commercial Enterprise]
+
+    if {$enable} then {
+      if {[string length $match_plugin_name] == 0 || \
+          $match_plugin_name eq "main"} then {
+        set fileName [maybeTransformPath file \
+            [file join $directory certificate.exml]]
+
+        if {[file exists $fileName]} then {
+          set name Override_Certificate
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set plugin_name <main>
+            set ::env($name) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {1} then {
+              #
+              # TODO: Change these if the primary development (encrypted?)
+              #       license certificate is ever updated with a new unique
+              #       identifier -OR- entity name.
+              #
+              set id 1b40f0fe-a2fc-4c42-a644-45a851e1c75d
+              set entityName "Eagle Development Team"
+
+              object invoke AppDomain.CurrentDomain SetData [appendArgs \
+                  $id _ [pid]] $entityName
+            }
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled encrypted  development certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+
+      foreach fileName [glob -nocomplain [file join \
+          $directory [appendArgs certificate -*.exml]]] {
+        set plugin_name [lindex \
+            [split [file rootname [file tail $fileName]] -] end]
+
+        if {[string length $match_plugin_name] > 0 && \
+            $plugin_name ne $match_plugin_name} then {
+          continue
+        }
+
+        #
+        # HACK: Skip any certificates with a lower case "plugin name"
+        #       portion of the file name.
+        #
+        if {[string is upper [string index $plugin_name 0]]} then {
+          set name [appendArgs \
+              Override_ $plugin_name _Certificate]
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set ::env($name) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled encrypted development certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+    } else {
+      foreach name [array names ::env Override_*_Certificate] {
+        if {[info exists ::env($name)] && \
+            [getPluginNameOnly $name "" plugin_name suffix_name]} then {
+          if {[string map [list _ .] $plugin_name] ni \
+              [getAllPackageNames]} then {
+            continue
+          }
+
+          if {[string length $match_plugin_name] > 0 && \
+              $plugin_name ne $match_plugin_name} then {
+            continue
+          }
+
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled encrypted development certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+
+      set name Override_Certificate
+
+      if {[info exists ::env($name)]} then {
+        if {[string length $match_plugin_name] == 0 || \
+            $match_plugin_name eq "main"} then {
+          set fileName $::env($name)
+
+          if {[file same [file dirname $fileName] $directory]} then {
+            set plugin_name <main>
+            unset ::env($name)
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled encrypted development certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+    }
+
+    return $result
+  }
+
+  proc trialLicenses {
+          packageName path enable {replace false} {quiet false} } {
+    # <help>
+    # This procedure attempts to make use of available trial license
+    # certificates for the specified package(s).  This procedure may
+    # do nothing.
+    # </help>
+
+    set level [lindex [info level [info level]] 0]
+    set match_plugin_name [string map [list . _] $packageName]
+
+    set plugin_mappings [list \
+        [list Security.Core Harpy] \
+        [list Licensing.Core Harpy] \
+        [list Licensing.Standard Harpy] \
+        [list Licensing.Enterprise Harpy] \
+        [list Security.Certificates Harpy] \
+        [list Badge.Enterprise Harpy] \
+        [list Kapok.Enterprise Kapok] \
+        [list Zeus.Enterprise Zeus] \
+        [list Demo.Enterprise Demo] \
+        [list HotKey.Enterprise HotKey] \
+        [list Featherlight.Environment Featherlight] \
+        [list AlphaCipher.Cryptography AlphaCipher] \
+        [list KeyPair.Generator AlphaCipher]]
+
+    set result [list]
+
+    if {$enable} then {
+      foreach plugin_mapping $plugin_mappings {
+        set plugin_name [lindex $plugin_mapping 0]
+
+        if {[string length $match_plugin_name] > 0 && \
+            $plugin_name ne $match_plugin_name} then {
+          continue
+        }
+
+        set directory_name [lindex $plugin_mapping 1]
+        set directory [file join $path $directory_name]
+
+        set fileName [maybeTransformPath file \
+            [file join $directory trial-certificate.xml]]
+
+        if {[file exists $fileName]} then {
+          set name [appendArgs \
+              Override_ [string map [list . _] $plugin_name] \
+              _Certificate]
+
+          if {$replace || ![info exists ::env($name)]} then {
+            set ::env($name) $fileName
+            lappend result [list $plugin_name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled trial certificate \"" \
+                  $fileName "\" for plugin \"" $plugin_name \".\n]
+            }
+          }
+        }
+      }
+    } else {
+      foreach plugin_mapping $plugin_mappings {
+        set plugin_name [lindex $plugin_mapping 0]
+
+        if {[string length $match_plugin_name] > 0 && \
+            $plugin_name ne $match_plugin_name} then {
+          continue
+        }
+
+        set name [appendArgs \
+            Override_ [string map [list . _] $plugin_name] \
+            _Certificate]
+
+        if {[info exists ::env($name)]} then {
+          set directory_name [lindex $plugin_mapping 1]
+          set directory [file join $path $directory_name]
+
+          set fileName [maybeTransformPath file \
+              [file join $directory trial-certificate.xml]]
+
+          unset ::env($name)
+
+          lappend result [list $plugin_name $fileName]
+
+          if {!$quiet} then {
+            host result Ok [appendArgs \
+                $level ": Disabled trial certificate \"" \
+                $fileName "\" for plugin \"" $plugin_name \".\n]
+          }
+        }
+      }
+    }
+
+    return $result
+  }
+
+  proc legacyLicenses {
+          packageName path enable {replace false} {quiet false} } {
+    # <help>
+    # This procedure attempts to copy the paths of any license certificates
+    # currently present in the environment to their legacy counterparts.
+    # This procedure may do nothing.
+    # </help>
+
+    set result [list]
+    set level [lindex [info level [info level]] 0]
+    set match_plugin_name [string map [list . _] $packageName]; # NOT USED
+    set directory $path
+
+    set package_names [getAllPackageNames]
+    lappend package_names Plugin Server; # NOTE: See Kapok "Web.config".
+
+    if {$enable} then {
+      set legacyPrefix [getLegacyLicensePrefix]
+
+      foreach name [array names ::env] {
+        if {[info exists ::env($name)] && \
+            [getPluginNameOnly $name false plugin_name suffix_name]} then {
+          if {[string map [list _ .] $plugin_name] ni $package_names} then {
+            continue
+          }
+
+          set legacyName [appendArgs $legacyPrefix _ $suffix_name]
+
+          if {$replace || ![info exists ::env($legacyName)]} then {
+            set fileName $::env($name)
+            set ::env($legacyName) $fileName
+            lappend result [list $name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Enabled legacy certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+    } else {
+      foreach name [array names ::env] {
+        if {[info exists ::env($name)] && \
+            [getPluginNameOnly $name true plugin_name suffix_name]} then {
+          if {[string map [list _ .] $plugin_name] ni $package_names} then {
+            continue
+          }
+
+          set fileName $::env($name)
+
+          if {[string length $directory] == 0 || \
+              [file same [file dirname $fileName] $directory]} then {
+            unset ::env($name)
+            lappend result [list $name $fileName]
+
+            if {!$quiet} then {
+              host result Ok [appendArgs \
+                  $level ": Disabled legacy certificate \"" \
+                  $fileName "\" for package \"" $packageName \".\n]
+            }
+          }
+        }
+      }
+    }
+
+    return $result
+  }
+
+  #
+  # NOTE: Provide the licensing package to the interpreter.
+  #
+  package provide Eagle.Licensing \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}
+
