@@ -22,7 +22,7 @@ It provides optional convenience layers, test hooks, and integrations with **Har
 * [checkUpdateZeusHook.eagle](#checkupdatezeushookeagle)
 * [Environment variables](#environment-variables)
 * [Examples](#examples)
-* [Harpy .harpy files](#harpy-harpy-files)
+* [Script certificates](#script-certificates)
 * [License](#license)
 * [Contributing](#contributing)
 * [Credits](#credits)
@@ -50,7 +50,7 @@ tclshrc.tcl
 testPrologue.eagle
 worker.eagle
 
-*.harpy (signed Harpy artifacts)
+*.harpy (script certificates)
 ```
 
 ---
@@ -61,20 +61,20 @@ worker.eagle
 Set the environment variable XDG_STARTUP_HOME to the path of this checkout.
 ```
 
-That command launches the standard startup chain described below.
+Upon startup of an Eagle interpreter, that will trigger loading of the chain-of-scripts described below.
 
 ---
 
 ## Startup chain overview
 
-| Stage | Script                              | Function                                                                            |
-| ----- | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| 1     | `startup.eagle`                     | Entry point; optionally wires in Harpy licensing hooks, then sources `tclshrc.tcl`. |
-| 2     | `tclshrc.tcl`                       | Loads and sources each startup file listed by `startup-lister.eagle`.               |
-| 3     | `startup-lister.eagle`              | Builds the ordered file list from `Settings/startup-settings-files.eagle`.          |
-| 4     | `startup-compat.eagle`              | Applies compatibility shims and prints “Interactive startup complete.”              |
-| 5     | `worker.eagle`, `shellWorker.eagle` | Background worker thread initialization (optional).                                 |
-| 6     | `testPrologue.eagle`                | Test-suite setup and WatchCat integration.                                          |
+| Stage | Script                              | Function                                                                                         |
+| ----- | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 1     | `startup.eagle`                     | Core library entry point; optionally wires in Harpy licensing hooks, then sources `tclshrc.tcl`. |
+| 2     | `tclshrc.tcl`                       | Loads and sources each startup file listed by `startup-lister.eagle`.                            |
+| 3     | `startup-lister.eagle`              | Builds the ordered file list from `Settings/startup-settings-files.eagle`.                       |
+| 4     | `startup-compat.eagle`              | Applies compatibility shims and prints “Interactive startup complete.”                           |
+| 5     | `worker.eagle`, `shellWorker.eagle` | Background worker and shell worker initialization (optional).                                    |
+| 6     | `testPrologue.eagle`                | Test-suite setup and WatchCat integration.                                                       |
 
 ---
 
@@ -85,7 +85,8 @@ All flags may be defined either in the `::no(...)` array or as environment varia
 | Flag                                     | Description                                   |
 | ---------------------------------------- | --------------------------------------------- |
 | `NoStartupRunCommands`                   | Skip sourcing `tclshrc.tcl`.                  |
-| `NoLicensingPackage` / `NoLicensing`     | Disable Harpy licensing hook.                 |
+| `NoLicensingPackage` / `NoLicensing`     | Skip setting up Harpy licensing hook.         |
+| `NoLoadOnStartupPublicAutoPath`          | Skip adding public packages to auto-path.     |
 | `NoWorkerThread`                         | Disable threaded startup messages.            |
 | `NETCFG_API_KEY`                         | API key used by `#netcfg`.                    |
 | `SCRATCH_ROOT`                           | Required by `#zeus` and `#cfgharpy`.          |
@@ -109,7 +110,7 @@ All flags may be defined either in the `::no(...)` array or as environment varia
 
 ### `startup.eagle`
 
-Entry point. Sets up environment flags, optionally installs the Harpy licensing hook, and sources `tclshrc.tcl`.
+Core library entry point for newly created interpreters. Sets up environment flags, optionally installs the Harpy licensing hook, and sources `tclshrc.tcl`.
 
 ### `tclshrc.tcl`
 
@@ -125,19 +126,19 @@ Adds version checks (`checkEagleBetaNN`) and prints “Interactive startup complet
 
 ### `worker.eagle`
 
-Background worker on a thread-pool thread. Waits for `::tcl_interactive` and prints a hello message.
+Background library worker, typically run on a thread-pool thread. For demonstration purposes.
 
 ### `shellWorker.eagle`
 
-Secondary helper that announces the thread id of the shell process.
+Background shell worker, typically run on a thread-pool thread. For demonstration purposes.
 
 ### `testPrologue.eagle`
 
 Configures the Eagle test environment:
 
-* Shorter timeouts, test verbosity, and Windows-specific optimizations.
-* Integrates with WatchCat.
+* Sets up timeouts, test verbosity, and platform-specific optimizations, etc.
 * Defines multiple `::no(...)` toggles to accelerate testing.
+* Integrates with WatchCat.
 
 ---
 
@@ -145,7 +146,7 @@ Configures the Eagle test environment:
 
 ### backcompat.eagle - compatibility shims
 
-Adds cross-version helper procs such as `checkEagleBetaNN`, `isWindows`, and minor defaults for recorder/prompt handling.
+Adds cross-version helper procedures such as `checkEagleBetaNN`, `isWindows`, and minor defaults for recorder/prompt handling.
 
 ### helpers.eagle - generic helpers
 
@@ -168,7 +169,7 @@ Adds miniature shell commands:
 | `##!`   | Return all matches.                    |
 | `##0`   | Import into history database.          |
 
-Stores history in rotating `cmds-*.eagle` files or SQLite DB (`cmds.db`).
+Stores history in rotating `cmds-*.eagle` files or a SQLite database (`cmds.db`).
 
 ### intExtCmds.eagle - interactive extension commands
 
@@ -180,7 +181,7 @@ Adds numerous diagnostic and convenience commands:
 | `#env ?enable? ?includeExisting?` | Show or set environment variables.            |
 | `#zeus ?enable?`                  | Toggle Zeus update hook.                      |
 | `#histset enable ?lock?`          | Enable/disable command history.               |
-| `#cfgharpy`                       | Enter Harpy configuration loop.               |
+| `#cfgharpy`                       | Enter Harpy interactive configuration loop.   |
 | `#unlockvar varName`              | Unlock a variable.                            |
 | `#kthreads`                       | Dispose live `Thread` objects.                |
 | `#showd`, `#pushd`, `#popd`       | Directory stack utilities.                    |
@@ -196,7 +197,7 @@ Interactive secret finder and copier:
 * Uses `HotKey` and WinForms clipboard.
 * Patterns loaded from `settings/secrets-patterns.eagle`.
 
-**Procs:**
+**Procedures:**
 `promptForAndCopySecret`, `findAndCopySecret`, `copySecretFromData`, `copySecretToClipboard`, `removeSecretFromClipboard`.
 
 ### sms.eagle - Twilio SMS integration
@@ -322,10 +323,10 @@ set ::env(KEYS_DIR) "C:/keys"
 
 ---
 
-## Harpy `.harpy` files
+## Script certificates
 
-Several scripts include `.harpy` counterparts - signed script certificates that can be verified by the Harpy plugin.
-They are not required for normal operation unless script certificate enforcement is enabled.
+All scripts include a `.harpy` counterpart - a signed script certificate that can be verified by the Harpy plugin.
+These are not required (for normal operation) unless script certificate enforcement is enabled.
 
 ---
 

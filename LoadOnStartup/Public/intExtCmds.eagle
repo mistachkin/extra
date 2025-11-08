@@ -229,8 +229,8 @@ namespace eval :: {
     # configuration subsystem.
     # </help>
 
-    if {![info exists ::env(SCRATCH_ROOT)]} then {
-      error "the SCRATCH_ROOT environment variable is not set"
+    if {![info exists ::env(XDG_STARTUP_HOME)]} then {
+      error "the XDG_STARTUP_HOME environment variable is not set"
     }
 
     if {[llength [info commands ksource]] == 0} then {
@@ -239,8 +239,8 @@ namespace eval :: {
 
     return [uplevel 1 [list \
         ksource -withcommands -useshared -useplugin -usecontext -- \
-        [file join $::env(SCRATCH_ROOT) eagle Harpy Configurations \
-        InteractiveLoop interactive_loop.eagle]]]
+        [file join $::env(XDG_STARTUP_HOME) Configurations InteractiveLoop \
+        interactive_loop.eagle]]]
   }
 
   proc #unlockvar { varName } {
