@@ -2,7 +2,7 @@
 
 This repository contains **extra packages, startup scripts, and interactive tools** for the [Eagle](https://urn.to/r/eagle) scripting language.
 
-It provides optional convenience layers, test hooks, and integrations with **Harpy**, **Zeus**, **Badge**, **WatchCat**, **Twilio SMS**, etc.
+It provides optional convenience layers, test hooks, and integrations with **Harpy**, **Zeus**, **Badge**, **Twilio SMS**, **Fossil-SCM chat**, etc.
 
 ---
 
@@ -16,7 +16,6 @@ It provides optional convenience layers, test hooks, and integrations with **Har
 * [Root scripts](#root-scripts)
 * [Configurations scripts](#configurations-scripts)
 * [LoadOnStartup/Public scripts](#loadonstartuppublic-scripts)
-* [LoadOnStartup/Public/WatchCat](#watchcat)
 * [LoadOnStartup/Private (site-specific)](#loadonstartupprivate-site-specific)
 * [Settings](#settings)
 * [Scripts/Public/badgeTest.eagle](#scriptspublicbadgetesteagle)
@@ -39,7 +38,6 @@ Configurations/
 LoadOnStartup/
   Public/
     Settings/
-    WatchCat/
 
 Scripts/
   Public/
@@ -224,12 +222,6 @@ Requires Twilio credentials and network access.
 ### chat.eagle - Fossil chat setup
 
 Provides `setupForChat` and `getDateTimeFormatForChat`; configures HotKey, Secrets, and Downloader packages for polling Fossil chat endpoints.
-
----
-
-## LoadOnStartup/Public/WatchCat
-
-`watchCat.eagle` enables live monitoring and log collection for test runs.
 
 ---
 
