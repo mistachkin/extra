@@ -1,8 +1,10 @@
-# Extra - add-on packages and tools for the Eagle scripting language
+# Add-on packages and tools for the Eagle scripting language
 
-This repository contains **extra packages, startup scripts, and interactive tools** for the [Eagle](https://urn.to/r/eagle) scripting language.
+This repository contains **startup scripts, integration packages, and interactive tools** for the [Eagle](https://urn.to/r/eagle) scripting language.
 
-It provides optional convenience layers, test hooks, and integrations with **Harpy**, **Zeus**, **Badge**, **Twilio SMS**, **Fossil-SCM chat**, etc.
+Originally, the contents of this repository were primarily designed for my personal use.
+
+They provide optional convenience commands, hooks, and integrations with **Harpy**, **Zeus**, **Badge**, **Twilio SMS**, **Fossil-SCM chat**, etc.
 
 ---
 
@@ -327,20 +329,20 @@ set ::env(KEYS_DIR) "C:/keys"
 
 ## Script certificates
 
-All scripts include a `.harpy` counterpart - a signed script certificate that can be verified by the Harpy plugin.
-These are not required (for normal operation) unless script certificate enforcement is enabled.
+All scripts include an associated `.harpy` file - which contains a certificate that allows the associated script to be verified by the Harpy script policy subsystem.
+These are not required (for normal operation) unless the Harpy plugin is loaded and its script certificate enforcement policy is enabled.
 
 ---
 
 ## License
 
-All files carry the Tcl-style license described in `license.terms`.
+All files carry the Tcl-style license as described in the Eagle `license.terms` file.
 
 ---
 
 ## Contributing
 
-Contributions should follow the Eagle project's conventions:
+Contributions should follow the Eagle project conventions:
 
 * Preserve existing indentation and conditional compilation style.
 * Preserve cross-platform compatibility (Windows, macOS, Linux).
