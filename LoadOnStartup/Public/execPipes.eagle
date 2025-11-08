@@ -20,6 +20,20 @@
 #       namespace if this script actually ends up being evaluated in Tcl.
 #
 namespace eval ::Eagle {
+  proc haveExecOptionTag { optionsVarName tag } {
+    upvar 1 $optionsVarName options
+
+    if {![info exists options(-tags)]} then {
+      return false
+    }
+
+    if {[lsearch -exact -- $options(-tags) $tag] == -1} then {
+      return false
+    }
+
+    return true
+  }
+
   proc createExecSubCommandList { optionsVarName args } {
     upvar 1 $optionsVarName options
 
