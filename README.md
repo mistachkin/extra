@@ -14,6 +14,7 @@ It provides optional convenience layers, test hooks, and integrations with **Har
 * [Configuration flags](#configuration-flags)
 * [Directory phases](#directory-phases-from-settingsstartup-settings-fileseagle)
 * [Root scripts](#root-scripts)
+* [Configurations scripts](#configurations-scripts)
 * [LoadOnStartup/Public scripts](#loadonstartuppublic-scripts)
 * [LoadOnStartup/Public/WatchCat](#watchcat)
 * [LoadOnStartup/Private (site-specific)](#loadonstartupprivate-site-specific)
@@ -32,6 +33,9 @@ It provides optional convenience layers, test hooks, and integrations with **Har
 ## Repository layout
 
 ```
+Configurations/
+  InteractiveLoop/
+
 LoadOnStartup/
   Public/
     Settings/
@@ -139,6 +143,12 @@ Configures the Eagle test environment:
 * Sets up timeouts, test verbosity, and platform-specific optimizations, etc.
 * Defines multiple `::no(...)` toggles to accelerate testing.
 * Integrates with WatchCat.
+
+---
+
+## Configurations scripts
+
+Contains (various) signed Harpy configuration (script) files.
 
 ---
 
