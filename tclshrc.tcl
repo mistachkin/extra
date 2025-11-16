@@ -27,7 +27,7 @@ namespace eval :: {
         #       e.g. the extra stuff that is useful for interactive
         #       use, etc.
         #
-        set path [file normalize [file dirname $script]]
+        set path(0) [file normalize [file dirname $script]]
 
         #
         # NOTE: Unless forbidden from doing so, add the public startup
@@ -35,7 +35,12 @@ namespace eval :: {
         #
         if {![info exists ::no(NoLoadOnStartupPublicAutoPath)] && \
             ![info exists ::env(NoLoadOnStartupPublicAutoPath)]} then {
-          lappend ::auto_path [file join $path LoadOnStartup Public]
+          set path(1) [file join $path(0) LoadOnStartup Public]
+
+          if {![info exists ::auto_path] || \
+              [lsearch -exact $::auto_path $path(1)] == -1} then {
+            lappend ::auto_path $path(1)
+          }
         }
 
         #
@@ -61,10 +66,10 @@ namespace eval :: {
         }
 
         if {!$quiet} then {
-          host result Ok [appendArgs "Starting from \"" $path "\"...\n\t"]
+          host result Ok [appendArgs "Starting from \"" $path(0) "\"...\n\t"]
         }
 
-        foreach fileName [source [file join $path startup-lister.eagle]] {
+        foreach fileName [source [file join $path(0) startup-lister.eagle]] {
           if {[file exists $fileName]} then {
             if {!$quiet} then {
               host result Return [appendArgs " " [file tail $fileName]]

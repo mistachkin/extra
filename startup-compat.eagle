@@ -40,7 +40,7 @@ apply [list [list] {; # shims & startup
     }
 
     if {[info exists ::tcl_interactive] && $::tcl_interactive} then {
-      checkEagleBeta36; # interactive command history?
+      checkEagleBeta36;   # interactive command history?
 
       #
       # HACK: This seems to increase thread contention and possibly
