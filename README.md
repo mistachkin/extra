@@ -17,6 +17,7 @@ They provide optional convenience commands, hooks, and integrations with **Harpy
 * [Directory phases](#directory-phases-from-settingsstartup-settings-fileseagle)
 * [Root scripts](#root-scripts)
 * [Configurations scripts](#configurations-scripts)
+* [KeyRing scripts](#keyring-scripts)
 * [LoadOnStartup/Public scripts](#loadonstartuppublic-scripts)
 * [LoadOnStartup/Private (site-specific)](#loadonstartupprivate-site-specific)
 * [Settings](#settings)
@@ -34,8 +35,15 @@ They provide optional convenience commands, hooks, and integrations with **Harpy
 ## Repository layout
 
 ```
+Certificates/
+  Script/
+    Plugin1.0/
+
 Configurations/
   InteractiveLoop/
+
+KeyRings/
+  Personal/
 
 LoadOnStartup/
   Public/
@@ -149,6 +157,12 @@ Configures the Eagle test environment:
 ## Configurations scripts
 
 Contains (various) signed Harpy configuration (script) files.
+
+---
+
+## KeyRing scripts
+
+Contains (various) signed Harpy keyring (script) files.
 
 ---
 
