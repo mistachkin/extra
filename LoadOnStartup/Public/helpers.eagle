@@ -235,7 +235,7 @@ namespace eval :: {
     }
   }
 
-  proc restoreCountInPrompt { channel {varName savedCountsInPrompt} } {
+  proc restoreCountsInPrompt { channel {varName savedCountsInPrompt} } {
     upvar 1 $varName savedCountsInPrompt
 
     if {[info exists savedCountsInPrompt]} then {
@@ -245,10 +245,10 @@ namespace eval :: {
 
         unset savedCountsInPrompt
       } error] == 0} then {
-        tputs $channel "---- restored saved count-in-prompt\n"
+        tputs $channel "---- restored saved counts-in-prompt\n"
       } else {
         tputs $channel [appendArgs \
-            "---- failed to restore saved count-in-prompt, error: " \
+            "---- failed to restore saved counts-in-prompt, error: " \
             $error \n]
       }
     }
