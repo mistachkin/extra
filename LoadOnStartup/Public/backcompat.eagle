@@ -206,10 +206,12 @@ namespace eval :: {
   }
 
   proc checkEagleBeta55 {} {
-    if {![info exists ::no(NoPromptCount)] && \
-        ![info exists ::env(NoPromptCount)] && \
+    if {![info exists ::no(NoPromptCommandCount)] && \
+        ![info exists ::env(NoPromptCommandCount)] && \
         [checkIsEagle]} then {
-      if {"Count" in [object invoke Enum GetNames PromptFlags]} then {
+      set flags [object invoke Enum GetNames PromptFlags]
+
+      if {"Count" in $flags} then {
         object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
             Interpreter.GetActive promptFlags +Count
       }
@@ -218,6 +220,24 @@ namespace eval :: {
 
   proc checkEagleBeta56 {} {
     if {[checkIsEagle]} then {
+      set flags [object invoke Enum GetNames PromptFlags]
+
+      if {![info exists ::no(NoPromptCommandCount)] && \
+          ![info exists ::env(NoPromptCommandCount)]} then {
+        if {"CommandCount" in $flags} then {
+          object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+              Interpreter.GetActive promptFlags +CommandCount
+        }
+      }
+
+      if {![info exists ::no(NoPromptActiveLoops)] && \
+          ![info exists ::env(NoPromptActiveLoops)]} then {
+        if {"ActiveLoops" in $flags} then {
+          object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
+              Interpreter.GetActive promptFlags +ActiveLoops
+        }
+      }
+
       if {[llength [info procs checkForTip237]] == 0} then {
         proc checkForTip237 { channel } {}
       }

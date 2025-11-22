@@ -212,38 +212,38 @@ namespace eval :: {
     }
   }
 
-  proc disableCountInPrompt { channel {varName savedCountInPrompt} } {
-    upvar 1 $varName savedCountInPrompt
+  proc disableCountsInPrompt { channel {varName savedCountsInPrompt} } {
+    upvar 1 $varName savedCountsInPrompt
 
-    if {![info exists savedCountInPrompt]} then {
+    if {![info exists savedCountsInPrompt]} then {
       if {[catch {
-        set savedCountInPrompt [object invoke \
+        set savedCountsInPrompt [object invoke \
             -flags +NonPublic Interpreter.GetActive promptFlags]
 
         object invoke -flags +NonPublic -objectflags \
             +AutoFlagsEnum Interpreter.GetActive promptFlags \
-            -Count
+            {-CommandCount ActiveLoops}
       } error] == 0} then {
         tputs $channel [appendArgs \
-            "---- disabled count-in-prompt, previously: " \
-            $savedCountInPrompt \n]
+            "---- disabled counts-in-prompt, previously: " \
+            $savedCountsInPrompt \n]
       } else {
         tputs $channel [appendArgs \
-            "---- failed to disable count-in-prompt, error: " \
+            "---- failed to disable counts-in-prompt, error: " \
             $error \n]
       }
     }
   }
 
-  proc restoreCountInPrompt { channel {varName savedCountInPrompt} } {
-    upvar 1 $varName savedCountInPrompt
+  proc restoreCountInPrompt { channel {varName savedCountsInPrompt} } {
+    upvar 1 $varName savedCountsInPrompt
 
-    if {[info exists savedCountInPrompt]} then {
+    if {[info exists savedCountsInPrompt]} then {
       if {[catch {
         object invoke -flags +NonPublic \
-            Interpreter.GetActive promptFlags $savedCountInPrompt
+            Interpreter.GetActive promptFlags $savedCountsInPrompt
 
-        unset savedCountInPrompt
+        unset savedCountsInPrompt
       } error] == 0} then {
         tputs $channel "---- restored saved count-in-prompt\n"
       } else {
