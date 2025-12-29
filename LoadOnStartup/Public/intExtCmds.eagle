@@ -1938,8 +1938,7 @@ namespace eval :: {
 
   proc #cacheon { {capacity ""} {thread false} {flags false} {quiet false} } {
     # <help>
-    # Enables caching of StringBuilder instances on a per-AppDomain
-    # basis.
+    # Enables caching of StringBuilder instances on a per-AppDomain basis.
     # </help>
 
     object invoke -flags +NonPublic \
@@ -1969,15 +1968,37 @@ namespace eval :: {
         # HACK: This must be done asynchronously because of startup use
         #       of the EndNoArgumentCache method.
         #
-        proc enableStringBuilderCacheFlags { state } {
+        proc enableStringBuilderCacheFlags { state } \
+            [string map [list %quiet% $quiet] {
           object removecallback enableStringBuilderCacheFlags
           rename enableStringBuilderCacheFlags ""
 
-          after 10000
+          if {[info exists \
+              ::eagle_debugger(stringBuilderCacheWaitMilliseconds)]} then {
+            set milliseconds \
+              $::eagle_debugger(stringBuilderCacheWaitMilliseconds)
+          } else {
+            #
+            # HACK: Try to wait enough time for startup to "complete".
+            #
+            set milliseconds 30000; # TODO: Good default?
+          }
+
+          if {!%quiet%} then {
+            host result Ok [appendArgs \
+                "Waiting for " $milliseconds " milliseconds before " \
+                "setting StringBuilder cache to enabled...\n"]
+          }
+
+          after $milliseconds
 
           object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
               Interpreter.GetActive cacheFlags +StringBuilder
-        }
+
+          if {!%quiet%} then {
+            host result Ok "Set StringBuilder cache to enabled.\n"
+          }
+        }]
 
         object invoke System.Threading.ThreadPool \
             QueueUserWorkItem enableStringBuilderCacheFlags
@@ -2017,8 +2038,7 @@ namespace eval :: {
 
   proc #cacheoff { {thread false} {flags false} {quiet false} } {
     # <help>
-    # Disables caching of StringBuilder instances on a per-AppDomain
-    # basis.
+    # Disables caching of StringBuilder instances on a per-AppDomain basis.
     # </help>
 
     object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
@@ -2040,15 +2060,37 @@ namespace eval :: {
         # HACK: This must be done asynchronously because of startup use
         #       of the EndNoArgumentCache method.
         #
-        proc disableStringBuilderCacheFlags { state } {
+        proc disableStringBuilderCacheFlags { state } \
+            [string map [list %quiet% $quiet] {
           object removecallback disableStringBuilderCacheFlags
           rename disableStringBuilderCacheFlags ""
 
-          after 10000
+          if {[info exists \
+              ::eagle_debugger(stringBuilderCacheWaitMilliseconds)]} then {
+            set milliseconds \
+              $::eagle_debugger(stringBuilderCacheWaitMilliseconds)
+          } else {
+            #
+            # HACK: Try to wait enough time for startup to "complete".
+            #
+            set milliseconds 30000; # TODO: Good default?
+          }
+
+          if {!%quiet%} then {
+            host result Ok [appendArgs \
+                "Waiting for " $milliseconds " milliseconds before " \
+                "setting StringBuilder cache to disabled...\n"]
+          }
+
+          after $milliseconds
 
           object invoke -flags +NonPublic -objectflags +AutoFlagsEnum \
               Interpreter.GetActive cacheFlags -StringBuilder
-        }
+
+          if {!%quiet%} then {
+            host result Ok "Set StringBuilder cache to disabled.\n"
+          }
+        }]
 
         object invoke System.Threading.ThreadPool \
             QueueUserWorkItem disableStringBuilderCacheFlags

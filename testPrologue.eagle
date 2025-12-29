@@ -103,10 +103,32 @@ if {[isEagle]} then {
 
     set ::test_timeout 20000;        # NOTE: Make timeouts more obvious?
 
-    if {![isOfficialStableReleaseInProgress]} then {
+    if {[isOfficialStableReleaseInProgress]} then {
+      #
+      # HACK: On Windows 7, be sure to skip running test(s) that require
+      #       Windows Update to be "functional".
+      #
+      if {[info exists ::tcl_platform(os)] && \
+          [info exists ::tcl_platform(osVersion)] && \
+          $::tcl_platform(os) eq "Windows NT" && \
+          $::tcl_platform(osVersion) eq "6.1"} then {
+        addToArgv -skip object-17.1
+
+        if {[info exists ::test_channel]} then {
+          tputs $::test_channel \
+              "---- skipping test \"object-17.1\" due to Windows 7...\n"
+        }
+      }
+    } else {
       if {![info exists ::tcl_platform(host)] || \
           $::tcl_platform(host) ne "DESKTOP-N5Q9D24"} then {
         set ::test_wait(post) 5000;  # NOTE: Wait between test files.
+
+        if {[info exists ::test_channel]} then {
+          tputs $::test_channel [appendArgs \
+              "---- set post-test wait time to " $::test_wait(post) \
+              " milliseconds\n"]
+        }
       }
     }
 
@@ -130,6 +152,10 @@ if {[isEagle]} then {
     if {[info exists ::no(NoRecordPerTestStatistics)] || \
         [info exists ::env(NoRecordPerTestStatistics)]} then {
       set ::no(leak,runTest) 1
+
+      if {[info exists ::test_channel]} then {
+        tputs $::test_channel "---- disabled per-test leak checking\n"
+      }
     }
 
     #
