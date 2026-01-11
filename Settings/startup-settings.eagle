@@ -43,6 +43,7 @@ apply [list [list script] {
   set ::eagle_debugger(autoSaveCmdsFile) 1
   set ::eagle_debugger(autoDiscardCmdsFile) 0
   set ::eagle_debugger(autoCancelCmdsFile) 0
+  set ::eagle_debugger(logRemoteMessageRetries) 3
 
   #############################################################################
 

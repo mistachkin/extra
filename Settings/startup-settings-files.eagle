@@ -26,7 +26,7 @@ apply [list [list script] {
   #############################################################################
 
   set directories(public) [file join $path LoadOnStartup Public]
-  set directories(watchCat) [file join $path WatchCat]
+  set directories(watchCat) [file join $path LoadOnStartup Public WatchCat]
   set directories(private) [file join $path LoadOnStartup Private]
   set directories(settings) [file join $path Settings]
 

@@ -87,6 +87,7 @@ Upon startup of an Eagle interpreter, that will trigger loading of the chain-of-
 | 4     | `startup-compat.eagle`              | Applies compatibility shims and prints “Interactive startup complete.”                           |
 | 5     | `worker.eagle`, `shellWorker.eagle` | Background worker and shell worker initialization (optional).                                    |
 | 6     | `testPrologue.eagle`                | Test-suite setup and WatchCat integration.                                                       |
+| 7     | `testEpilogue.eagle`                | Test-suite cleanup and diagnostic reporting.                                                     |
 
 ---
 
@@ -151,6 +152,10 @@ Configures the Eagle test environment:
 * Sets up timeouts, test verbosity, and platform-specific optimizations, etc.
 * Defines multiple `::no(...)` toggles to accelerate testing.
 * Integrates with WatchCat.
+
+### `testEpilogue.eagle`
+
+* Logs any internal errors (i.e. complaints) encountered by the test suite.
 
 ---
 
