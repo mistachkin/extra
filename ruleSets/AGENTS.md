@@ -1,4 +1,4 @@
-# Eagle Ruleset Definition Files — Agent Specification
+# Eagle Ruleset Files — Agent Specification
 
 ## 1. Purpose
 
