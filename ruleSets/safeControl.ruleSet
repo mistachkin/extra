@@ -14,7 +14,7 @@
 #
 ###############################################################################
 # NOTE: This ruleset is designed to allow for the Tcl 8.x and/or Eagle commands
-#       that implement script control structures.
+#       that implement "safe" script control structures.
 ###############################################################################
 
 rule {

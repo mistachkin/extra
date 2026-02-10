@@ -1,6 +1,6 @@
 ###############################################################################
 #
-# unsafeControl.ruleSet --
+# procManager.ruleSet --
 #
 # Extensible Adaptable Generalized Logic Engine (Eagle)
 # Eagle RuleSet File
@@ -14,33 +14,21 @@
 #
 ###############################################################################
 # NOTE: This ruleset is designed to allow for the Tcl 8.x and/or Eagle commands
-#       that implement "unsafe" script control structures.
+#       that deal with (re-)defining procedures.
 ###############################################################################
 
 rule {
-  type Include kind Command mode {Include Exact} patterns downlevel
+  type Include kind Command mode {Include Exact} patterns namespace
 }
 
 rule {
-  type Include kind Command mode {Include Exact} patterns exit
+  type Include kind Command mode {Include Exact} patterns nproc
 }
 
 rule {
-  type Include kind Command mode {Include Exact} patterns invoke
+  type Include kind Command mode {Include Exact} patterns proc
 }
 
 rule {
-  type Include kind Command mode {Include Exact} patterns scope
-}
-
-rule {
-  type Include kind Command mode {Include Exact} patterns source
-}
-
-rule {
-  type Include kind Command mode {Include Exact} patterns time
-}
-
-rule {
-  type Include kind Command mode {Include Exact} patterns uplevel
+  type Include kind Command mode {Include Exact} patterns rename
 }
