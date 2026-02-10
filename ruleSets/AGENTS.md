@@ -68,7 +68,7 @@ These rulesets provide minimal baselines for the most restricted use cases.
 **Script commands:** `nop`
 
 The most restrictive ruleset available. It permits only the `nop` script
-command, which does nothing and returns nothing. This script command is safe.
+command, which does nothing and returns nothing. This script command is `'safe'`.
 
 **Use cases:** Serves as a baseline for composition. A script evaluated under
 this ruleset alone cannot perform any meaningful work. This ruleset is useful as
@@ -139,7 +139,7 @@ for scripts that transform between string and list representations.
 `unset`, `unsetf`, `upvar`, `vwait`, `variable`, `namespace`
 
 Permits variable assignment, array manipulation, scoping, and namespace-scoped
-variable access. Most script commands in this ruleset are safe; the exceptions
+variable access. Most script commands in this ruleset are `'safe'`; the exceptions
 are `getf`, `setf`, and `unsetf`, which access script evaluation interpreter
 flags.
 
@@ -199,7 +199,7 @@ scope isolation is a requirement.
 nature of ruleset files (see section 4.4). While `control.ruleSet` groups
 script commands by functional category (all control-flow script commands),
 `safeControl.ruleSet` draws a security boundary within that same category —
-permitting only the script commands that are safe within a scope-isolated
+permitting only the script commands that are `'safe'` within a scope-isolated
 evaluation sandbox.
 
 #### 3.2.7. `unsafeControl.ruleSet`
@@ -234,7 +234,59 @@ renaming.
 code into named routines. Compose with `control.ruleSet` for scripts that
 define and call procedures with control flow.
 
-#### 3.2.9. `namespace.ruleSet`
+**Partitioning:** This ruleset is partitioned into `procCaller.ruleSet` (2
+script commands, section 3.2.9) and `procManager.ruleSet` (4 script commands,
+section 3.2.10), which together illustrate the dual-use nature of ruleset files
+(see section 4.4). This partition is valuable because defining procedures and
+calling procedures represent fundamentally different levels of trust. A script
+that only defines (or redefines) procedures is purely declarative — it is not
+executing arbitrary script code, it is merely establishing procedure definitions
+that may be called later. Conversely, a script that only calls procedures
+consumes those definitions without the ability to create or modify them.
+
+#### 3.2.9. `procCaller.ruleSet`
+
+**Script commands:** `apply`, `napply`
+
+The subset of `proc.ruleSet` containing only the script commands that call
+procedures. These script commands apply anonymous procedures but cannot define,
+rename, or otherwise modify the set of available procedures. Together with
+`procManager.ruleSet`, this forms a complete partition of `proc.ruleSet`
+(2 + 4 = 6 script commands).
+
+**Ideal scripts:** Scripts that need to call pre-defined anonymous procedures
+but should not be permitted to (re-)define procedures, rename script commands,
+or manipulate namespaces. This is the preferred procedure-related ruleset for
+environments where procedure definitions are managed externally and the
+evaluated script is a consumer of those definitions.
+
+**Relationship to `proc.ruleSet`:** This ruleset demonstrates the dual-use
+nature of ruleset files (see section 4.4). While `proc.ruleSet` groups script
+commands by functional category (all procedure-related script commands),
+`procCaller.ruleSet` draws a role boundary within that same category —
+permitting only the script commands that consume procedures without the ability
+to create or modify them.
+
+#### 3.2.10. `procManager.ruleSet`
+
+**Script commands:** `namespace`, `nproc`, `proc`, `rename`
+
+The complement of `procCaller.ruleSet` within `proc.ruleSet`. These are the
+procedure-related script commands that (re-)define procedures (`nproc`, `proc`),
+rename or delete script commands (`rename`), or manage namespaces (`namespace`).
+
+**Ideal scripts:** Setup and initialization scripts that define procedures for
+later use by other scripts, or administrative scripts that manage the set of
+available procedures and their organization within namespaces. These capabilities
+are appropriate for scripts that configure the interpreter prior to evaluating
+untrusted consumer scripts.
+
+**Potential problems:** The `rename` command can rename or delete any script
+command, which can alter the effective script command set in ways that affect
+subsequent evaluations. The `proc` and `nproc` commands can redefine existing
+procedures, potentially changing their behavior.
+
+#### 3.2.11. `namespace.ruleSet`
 
 **Script commands:** `namespace`
 
@@ -244,7 +296,7 @@ Permits namespace creation and manipulation.
 namespaces. This is a single-command ruleset, typically composed with
 `proc.ruleSet` and `variable.ruleSet`.
 
-#### 3.2.10. `io.ruleSet`
+#### 3.2.12. `io.ruleSet`
 
 **Script commands:** `close`, `eof`, `fblocked`, `fconfigure`, `fcopy`,
 `flush`, `gets`, `puts`, `read`, `seek`, `tell`, `truncate`
@@ -260,7 +312,7 @@ permits I/O operations on channels that are already open, but does not include
 contents. The `fconfigure` command can change channel properties in ways that
 affect other consumers of the same channel.
 
-#### 3.2.11. `event.ruleSet`
+#### 3.2.13. `event.ruleSet`
 
 **Script commands:** `after`, `bgerror`, `callback`, `update`, `vwait`
 
@@ -276,7 +328,7 @@ and `vwait` can cause a script to block indefinitely. These script commands
 should be used with care in server-side evaluation contexts where execution time
 is bounded.
 
-#### 3.2.12. `introspection.ruleSet`
+#### 3.2.14. `introspection.ruleSet`
 
 **Script commands:** `clock`, `info`, `pid`, `version`
 
@@ -285,7 +337,7 @@ current time, examining script command and variable metadata, retrieving the
 process ID, and checking the interpreter version.
 
 **Ideal scripts:** Diagnostic scripts, version checks, capability detection.
-This is a safe, read-only ruleset with no side effects.
+This is a `'safe'`, read-only ruleset with no side effects.
 
 ### 3.3. Security-Sensitive Rulesets
 
@@ -301,7 +353,7 @@ API keys with administrator access.
 
 Permits interaction with the host file system: changing directories, querying
 file metadata, loading native libraries, opening files, and sourcing external
-scripts. All script commands in this ruleset are considered unsafe.
+scripts. All script commands in this ruleset are considered `'unsafe'`.
 
 **Ideal scripts:** Maintenance scripts, file processing workflows, plugin
 loading. This ruleset should only be used when the evaluated script is trusted
@@ -318,7 +370,7 @@ The `cd` command changes the working directory globally.
 
 Permits network access: opening network sockets, sourcing scripts from network
 locations, and URI manipulation. All script commands in this ruleset are
-considered unsafe.
+considered `'unsafe'`.
 
 **Ideal scripts:** Scripts that need to make network connections, fetch remote
 resources, or interact with web services. This ruleset should only be used in
@@ -352,11 +404,11 @@ interpreter. Any one of these can be used to bypass the evaluation sandbox.
 **Script commands:** `debug`, `exec`, `host`, `interp`, `library`, `object`,
 `sql`, `tcl`, `xml`
 
-Contains script commands that are considered unsafe but excludes script commands
-that have one or more safe script sub-commands (such as `clock`, `file`, `info`,
+Contains script commands that are considered `'unsafe'` but excludes script commands
+that have one or more `'safe'` script sub-commands (such as `clock`, `file`, `info`,
 `interp`, `object`, `package`, `source`, and `uri`). Note that `interp` and
 `object` appear in this ruleset because the top-level script commands themselves
-are unsafe, even though certain script sub-commands may be safe.
+are `'unsafe'`, even though certain script sub-commands may be `'safe'`.
 
 **Ideal scripts:** Administrative scripts in fully trusted environments. This
 ruleset is effectively the inverse of `'safe'` mode — it enumerates the script
@@ -426,7 +478,7 @@ control flow, list and string manipulation, library loading, and package
 management.
 
 **Ideal scripts:** Scripts that need to load and initialize the Harpy Security
-SDK. This ruleset includes `file` and `load`, which are unsafe, so it should
+SDK. This ruleset includes `file` and `load`, which are `'unsafe'`, so it should
 only be used in contexts where the script is trusted to interact with the
 security subsystem.
 
@@ -459,7 +511,7 @@ version-specific compatibility testing and migration.
 #### 3.5.1. `tcl84.ruleSet`
 
 **Script commands:** 85 script commands — the full Tcl 8.4 core script command
-set, including unsafe script commands.
+set, including `'unsafe'` script commands.
 
 Permits all script commands available in Tcl 8.4, including file system access,
 networking, process execution, and interpreter manipulation. This is a
@@ -468,7 +520,7 @@ comprehensive ruleset intended for scripts that need full Tcl 8.4 compatibility.
 **Ideal scripts:** Legacy Tcl 8.4 scripts being evaluated in an Eagle
 interpreter for compatibility testing or migration.
 
-**Potential problems:** This ruleset includes all unsafe Tcl 8.4 script commands
+**Potential problems:** This ruleset includes all `'unsafe'` Tcl 8.4 script commands
 and should only be used in trusted environments.
 
 #### 3.5.2. `tcl85.ruleSet`
@@ -514,7 +566,7 @@ alternative implementations in Eagle.
 standard Eagle interpreter.
 
 The most permissive ruleset available. It permits all Eagle script commands,
-including all safe and unsafe script commands. This is the ruleset equivalent of
+including all `'safe'` and `'unsafe'` script commands. This is the ruleset equivalent of
 running with no script command restrictions.
 
 **Ideal scripts:** Fully trusted scripts that need unrestricted access to the
@@ -591,7 +643,7 @@ explicitly ensure that a script command appears in introspection output.
 ### 4.1. Composition Principles
 
 Rulesets are designed to be composed. The functional rulesets (sections 3.2.1
-through 3.2.12) each cover a single domain and can be combined to build an
+through 3.2.14) each cover a single domain and can be combined to build an
 evaluation sandbox tailored to the specific needs of the evaluated script. The
 following principles apply:
 
@@ -611,8 +663,9 @@ following principles apply:
    script command that should be denied in a specific context, add an explicit
    `Exclude` rule rather than restructuring the composition.
 
-5. **Prefer safe subsets when available.** When a functional ruleset has a safe
-   subset (e.g. `safeControl.ruleSet` for `control.ruleSet`), prefer the safe
+5. **Prefer `'safe'` subsets when available.** When a functional ruleset has a
+   subset that matches the specific need (e.g. `safeControl.ruleSet` for
+   `control.ruleSet`, or `procCaller.ruleSet` for `proc.ruleSet`), prefer the
    subset unless the script specifically requires the excluded script commands.
    This reduces the attack surface without sacrificing the core functionality
    of the domain.
@@ -641,7 +694,7 @@ procedure definitions, basic I/O, and read-only introspection. By using
 script commands (`downlevel`, `uplevel`), interpreter-modifying script commands
 (`exit`, `invoke`), external file loading (`source`), and timing side-channels
 (`time`), providing stronger scope isolation guarantees. It also excludes file
-system access, network access, and all other unsafe script commands.
+system access, network access, and all other `'unsafe'` script commands.
 
 **Ideal for:** Customer-authored business logic, AI agent scripts, educational
 submissions, data transformation pipelines.
@@ -676,7 +729,7 @@ includeRuleSet tcl85
 includeRuleSet tcl86
 ```
 
-Produces the full Tcl 8.4 + 8.5 + 8.6 script command set. Includes all unsafe
+Produces the full Tcl 8.4 + 8.5 + 8.6 script command set. Includes all `'unsafe'`
 script commands. Suitable only for trusted environments.
 
 #### SDK Integration
@@ -689,7 +742,7 @@ includeRuleSet loader1
 ```
 
 Permits the script commands required for Harpy Security SDK and License SDK
-integration, including plugin loader support. Includes unsafe script commands
+integration, including plugin loader support. Includes `'unsafe'` script commands
 (`file`, `load`) — suitable only for trusted SDK initialization scripts.
 
 ### 4.3. Composition Limitations
@@ -711,9 +764,9 @@ integration, including plugin loader support. Includes unsafe script commands
 4. **Overlap between rulesets.** Several rulesets include the same script
    commands (e.g., `source` appears in `control.ruleSet`, `fileSystem.ruleSet`,
    and `network.ruleSet`; `namespace` appears in `variable.ruleSet`,
-   `proc.ruleSet`, and `namespace.ruleSet`). Duplicate inclusions are harmless
-   but should be understood when reasoning about the effective script command
-   set.
+   `proc.ruleSet`, `procManager.ruleSet`, and `namespace.ruleSet`). Duplicate
+   inclusions are harmless but should be understood when reasoning about the
+   effective script command set.
 
 ### 4.4. Dual-Use Classification
 
@@ -724,30 +777,42 @@ Ruleset files serve two distinct but complementary purposes:
    `control.ruleSet` groups all script commands that implement script control
    flow, regardless of their individual security characteristics.
 
-2. **Security boundary.** A ruleset can represent a security or other conceptual
-   boundary, selecting only the script commands within a domain that satisfy a
-   particular safety criterion. For example, `safeControl.ruleSet` selects only
-   the control-flow script commands that do not change the active variable
-   scope, modify non-local variable state, modify interpreter state, or access
-   external files or side-channels.
+2. **Security or conceptual boundary.** A ruleset can represent a security or
+   other conceptual boundary, selecting only the script commands within a
+   domain that satisfy a particular criterion. For example,
+   `safeControl.ruleSet` selects only the control-flow script commands that do
+   not change the active variable scope, modify non-local variable state,
+   modify interpreter state, or access external files or side-channels.
 
-The `safeControl.ruleSet` and `unsafeControl.ruleSet` pair illustrates this
-dual-use nature: both are subsets of `control.ruleSet`, and together they form
-a complete partition (18 + 7 = 25 script commands). One groups the safe script
-commands within the control-flow domain; the other groups the unsafe ones. The
-functional category remains the same; the security boundary differs.
+Two pairs of rulesets illustrate this dual-use nature:
+
+**Security boundary (`control.ruleSet`):** The `safeControl.ruleSet` and
+`unsafeControl.ruleSet` pair partitions `control.ruleSet` along a security
+boundary (18 + 7 = 25 script commands). One groups the script commands that are
+`'safe'` within a scope-isolated evaluation sandbox; the other groups the script
+commands that can change scope, modify interpreter state, or access external
+resources. The functional category remains the same; the security boundary
+differs.
+
+**Role boundary (`proc.ruleSet`):** The `procCaller.ruleSet` and
+`procManager.ruleSet` pair partitions `proc.ruleSet` along a role boundary
+(2 + 4 = 6 script commands). One groups the script commands that consume
+procedures (anonymous procedure application); the other groups the script
+commands that produce procedures (definition, renaming, namespace management).
+The functional category remains the same; the operational role differs.
 
 This pattern can be applied to any functional ruleset. When the full script
 command set of a functional ruleset includes script commands with differing
-security profiles, splitting it into safe and unsafe subsets provides the
-granularity needed to satisfy both functional requirements (which script commands
-are needed) and security requirements (which script commands are safe to permit)
-simultaneously.
+security profiles or operational roles, splitting it into complementary subsets
+provides the granularity needed to satisfy both functional requirements (which
+script commands are needed) and boundary requirements (which script commands are
+appropriate for the given context) simultaneously.
 
 **Guidance for agents:** When composing rulesets, consider whether the
-composition is driven by functional requirements, security requirements, or
-both. When a safe subset is available for a functional ruleset, prefer the safe
-subset unless the script specifically requires the excluded script commands.
+composition is driven by functional requirements, security requirements, role
+requirements, or a combination thereof. When a subset is available for a
+functional ruleset, prefer the subset that most closely matches the needs of the
+evaluated script.
 
 ## 5. Security Considerations
 
@@ -757,8 +822,8 @@ The rulesets implicitly define a three-tier safety classification:
 
 | Tier | Description | Rulesets |
 |---|---|---|
-| Safe | Script commands with no side effects beyond the interpreter state. | `common`, `configuration`, `expr`, `string`, `list`, `safeControl`, `introspection` |
-| Sensitive | Script commands with potential side effects that require care. | `variable`, `control`, `unsafeControl`, `proc`, `io`, `event`, `namespace` |
+| Safe | Script commands with no side effects beyond modifying the implicit interpreter state (e.g. number of commands executed, etc). | `common`, `configuration`, `expr`, `string`, `list`, `safeControl`, `procCaller`, `introspection` |
+| Sensitive | Script commands with potential side effects that require care. | `variable`, `control`, `unsafeControl`, `proc`, `procManager`, `io`, `event`, `namespace` |
 | Unsafe | Script commands that access system resources or bypass security. | `fileSystem`, `network`, `critical`, `unsafe`, `meta` |
 
 The placement of `safeControl` in the Safe tier and `unsafeControl` in the
@@ -766,24 +831,41 @@ Sensitive tier reflects their role as a security partition of `control.ruleSet`:
 the script commands in `unsafeControl` are precisely the script commands that
 elevate `control.ruleSet` from the Safe tier to the Sensitive tier.
 
+Similarly, the placement of `procCaller` in the Safe tier and `procManager` in
+the Sensitive tier reflects their role as a role partition of `proc.ruleSet`.
+The script commands in `procCaller` (`apply`, `napply`) are purely functional —
+they apply anonymous procedures without side effects beyond modifying the
+implicit interpreter state (e.g. number of commands executed, etc), which
+places them squarely in the Safe tier. The script commands in `procManager`
+(`namespace`, `nproc`, `proc`, `rename`) can (re-)define procedures, rename or
+delete script commands, and manage namespaces, which are operations that modify
+the interpreter's script command set and require care.
+
+However, `procManager` operations are notably declarative: they establish
+procedure definitions for later use rather than executing arbitrary script
+code. This declarative character distinguishes them from the Unsafe tier — the
+script commands in `procManager` configure the interpreter's available
+procedures but do not, by themselves, access system resources or bypass the
+evaluation sandbox.
+
 ### 5.2. Script Commands That Span Tiers
 
-Several script commands have both safe and unsafe script sub-commands. The
+Several script commands have both `'safe'` and `'unsafe'` script sub-commands. The
 rulesets handle this in different ways:
 
-- `unsafe.ruleSet` explicitly excludes script commands with safe script
+- `unsafe.ruleSet` explicitly excludes script commands with `'safe'` script
   sub-commands (`clock`, `file`, `info`, `interp`, `object`, `package`,
-  `source`, `uri`) even though the top-level script command is unsafe. This is
+  `source`, `uri`) even though the top-level script command is `'unsafe'`. This is
   noted in the file's header comment.
 - `fileSystem.ruleSet` includes `file` and `source` because the file-system
-  functionality requires the unsafe script sub-commands.
+  functionality requires the `'unsafe'` script sub-commands.
 - `control.ruleSet` includes `source` for script loading, even though `source`
-  can access the file system or network. The safe/unsafe split of
+  can access the file system or network. The `'safe'`/`'unsafe'` split of
   `control.ruleSet` places `source` in `unsafeControl.ruleSet`, reflecting
   this cross-tier concern.
 
 **Guidance for agents:** Agents composing rulesets should be aware that
-including a script command with mixed safe/unsafe script sub-commands may grant
+including a script command with mixed `'safe'`/`'unsafe'` script sub-commands may grant
 access to both. The server's security policies may impose additional
 restrictions at the script sub-command level, if applicable and available.
 
