@@ -512,7 +512,7 @@ Windows registry.
 
 ```tcl
 package require Eagle.Mathematica
-set result [mathematica "Integrate[x^2, x]"]
+set result [mathematica {Integrate[x^2, x]}]
 ```
 
 **Platform note:** On Windows, the procedure locates the `Wolfram.NETLink.dll`
@@ -949,7 +949,7 @@ enableZeusUpdateHook true
 
 ```tcl
 package require Eagle.Mathematica
-set result [mathematica "Series[Exp[x], {x, 0, 5}]"]
+set result [mathematica {Series[Exp[x], {x, 0, 5}]}]
 ```
 
 ### 13.9. Skipping Optional Startup Features
