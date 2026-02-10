@@ -1,0 +1,90 @@
+###############################################################################
+#
+# safeControl.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for the Tcl 8.x and/or Eagle commands
+#       that implement script control structures.
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns apply
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns break
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns catch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns continue
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns do
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns error
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eval
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns for
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns foreach
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns if
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lmap
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns napply
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns return
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns subst
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns switch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns throw
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns try
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns while
+}
