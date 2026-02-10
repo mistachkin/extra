@@ -209,21 +209,19 @@ evaluation sandbox.
 
 The complement of `safeControl.ruleSet` within `control.ruleSet`. These are the
 control-flow script commands that can change the active variable scope
-(`downlevel`, `scope`, `uplevel`), modify interpreter state (`exit`, `invoke`),
+(`downlevel`, `invoke`, `scope`, `uplevel`), modify interpreter state (`exit`),
 or access external files or side-channels (`source`, `time`).
 
 **Ideal scripts:** Scripts that require scope traversal, external file loading,
-timing measurement, or the ability to invoke hidden script commands. These
+timing measurement, or the ability to modify interpreter state. These
 capabilities are necessary for certain administrative and infrastructure scripts
 but are inappropriate for untrusted script evaluation.
 
 **Potential problems:** The `exit` command can terminate the interpreter. The
 `source` command can load external script files, which may introduce unreviewed
-code. The `uplevel` and `downlevel` commands can modify variables in ancestor
-call frames, potentially bypassing scope-based security assumptions. The
-`invoke` command can invoke hidden or renamed script commands, circumventing
-command visibility restrictions. The `time` command exposes a timing
-side-channel.
+code. The `uplevel`, `downlevel`, and `invoke` commands can modify variables in
+ancestor call frames, potentially bypassing scope-based security assumptions.
+The `time` command exposes a timing side-channel.
 
 #### 3.2.8. `proc.ruleSet`
 
