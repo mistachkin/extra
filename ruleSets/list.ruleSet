@@ -1,0 +1,78 @@
+###############################################################################
+#
+# list.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for the Tcl 8.x and/or Eagle commands
+#       that deal with list script variable and/or value manipulation.
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lappend
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lassign
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lget
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lindex
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns linsert
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns list
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns llength
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lrange
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lremove
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lrepeat
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lreplace
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lreverse
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsearch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lset
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsort
+}

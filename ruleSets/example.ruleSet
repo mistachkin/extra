@@ -1,0 +1,26 @@
+###############################################################################
+#
+# example.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to be an example of how to define a ruleset
+#       that both allows and disallows commands.
+###############################################################################
+
+rule {
+  id 1 type Include kind Command mode {Exclude Glob} patterns o*
+}
+
+rule {
+  id 2 type Exclude kind Command mode {Include Exact} patterns open
+}

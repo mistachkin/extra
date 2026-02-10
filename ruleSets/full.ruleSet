@@ -1,0 +1,470 @@
+###############################################################################
+#
+# full.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for all Tcl 8.x and/or Eagle commands
+#       that exist in the Eagle core library / language.
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns after
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns append
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns apply
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns array
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns base64
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns bgerror
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns break
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns callback
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns catch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns cd
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns clock
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns close
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns concat
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns continue
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns debug
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns do
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns downlevel
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eof
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns error
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eval
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns exec
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns exit
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns expr
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fblocked
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fconfigure
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fcopy
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns flush
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns for
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns foreach
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns format
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fpclassify
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns getf
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns gets
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns glob
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns global
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns host
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns if
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns incr
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns info
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns interp
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns invoke
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns join
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns kill
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lappend
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lassign
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lget
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns library
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lindex
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns linsert
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns list
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns llength
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lmap
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns load
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lrange
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lremove
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lrepeat
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lreplace
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lreverse
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsearch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lset
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsort
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns napply
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns nop
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns nproc
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns object
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns open
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns package
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns parse
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pid
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns proc
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns puts
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pwd
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns read
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns regexp
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns regsub
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns rename
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns return
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns scope
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns seek
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns set
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns setf
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns socket
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns source
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns split
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns sql
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns subst
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns switch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tell
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns test1
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns test2
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns throw
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns time
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns truncate
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns try
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns unload
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns unset
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns unsetf
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns update
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns uplevel
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns upvar
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns vwait
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns while
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns xml
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns encoding
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns file
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns guid
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns hash
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns string
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns uri
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns variable
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns version
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns namespace
+}

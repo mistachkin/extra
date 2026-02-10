@@ -20,6 +20,7 @@ They provide optional convenience commands, hooks, and integrations with **Harpy
 * [KeyRing scripts](#keyring-scripts)
 * [LoadOnStartup/Public scripts](#loadonstartuppublic-scripts)
 * [LoadOnStartup/Private (site-specific)](#loadonstartupprivate-site-specific)
+* [RuleSet files](#ruleset-files)
 * [Settings](#settings)
 * [Scripts/Public/badgeTest.eagle](#scriptspublicbadgetesteagle)
 * [checkUpdateZeusHook.eagle](#checkupdatezeushookeagle)
@@ -251,6 +252,12 @@ Provides `setupForChat` and `getDateTimeFormatForChat`; configures HotKey, Secre
 * `auth.eagle` - authentication credentials.
 
 (These are referenced but not part of this public repo.)
+
+---
+
+### RuleSet files
+
+Various ruleset files that may be used to configure an interpreter.
 
 ---
 

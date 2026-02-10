@@ -1,0 +1,27 @@
+###############################################################################
+#
+# loader1.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for the commands provided by Eagle
+#       that are not present in Tcl 8.4 AND that are required for use by the
+#       plugin loader.
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns apply
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns try
+}

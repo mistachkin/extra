@@ -1,0 +1,66 @@
+###############################################################################
+#
+# io.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for all Tcl 8.x and/or Eagle commands
+#       that deal with input / output to a file, network stream, console, etc.
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns close
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eof
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fblocked
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fconfigure
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fcopy
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns flush
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns gets
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns puts
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns read
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns seek
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tell
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns truncate
+}

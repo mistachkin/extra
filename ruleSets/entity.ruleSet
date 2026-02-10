@@ -1,0 +1,128 @@
+###############################################################################
+#
+# entity.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow for all Tcl 8.x and/or Eagle commands
+#       that are used to define (ledger) entities and their attributes.
+###############################################################################
+#                                ENTITY TYPES                                 #
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Organization
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Account
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Category
+}
+
+###############################################################################
+#                               ATTRIBUTE TYPES                               #
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Validation
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Notes
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Id
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns ParentId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Name
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Description
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Number
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Submitted
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Effective
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Created
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns OrganizationId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns AccountId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns ParentOrganization
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns ParentOrganizationId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns ParentAccount
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns ParentAccountId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Status
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns StatusId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Type
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns TypeId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns CategoryId
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns Currency
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns CurrencyId
+}

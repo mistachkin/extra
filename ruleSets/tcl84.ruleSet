@@ -1,0 +1,395 @@
+###############################################################################
+#
+# tcl84.ruleSet --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle RuleSet File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+# NOTE: This ruleset is designed to allow all core library commands that are
+#       present in Tcl 8.4, including those that are "unsafe".
+###############################################################################
+
+rule {
+  type Include kind Command mode {Include Exact} patterns after
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns append
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns array
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns bgerror
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns binary
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns break
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns case
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns catch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns cd
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns clock
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns close
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns concat
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns continue
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns dde
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns encoding
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eof
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns error
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns eval
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns exec
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns exit
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns expr
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fblocked
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fconfigure
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fcopy
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns file
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns fileevent
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns flush
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns for
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns foreach
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns format
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns gets
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns glob
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns global
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns history
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns if
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns incr
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns info
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns interp
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns join
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lappend
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lindex
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns linsert
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns list
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns llength
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns load
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lrange
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lreplace
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsearch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lset
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns lsort
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns memory
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns namespace
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns open
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns package
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns parray
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pid
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pkg::create
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pkg_mkIndex
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns proc
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns puts
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns pwd
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns read
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns regexp
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns registry
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns regsub
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns rename
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns return
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns scan
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns seek
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns set
+}
+
+
+rule {
+  type Include kind Command mode {Include Exact} patterns socket
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns source
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns split
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns string
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns subst
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns switch
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_endOfWord
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_findLibrary
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_startOfNextWord
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_startOfPreviousWord
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_wordBreakAfter
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tcl_wordBreakBefore
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tclLog
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns tell
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns time
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns trace
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns unknown
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns unset
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns update
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns uplevel
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns upvar
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns variable
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns vwait
+}
+
+rule {
+  type Include kind Command mode {Include Exact} patterns while
+}
