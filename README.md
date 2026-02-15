@@ -1,4 +1,4 @@
-# Add-on packages and tools for the Eagle Scripting Language
+# Add-ons for the Eagle Scripting Language
 
 This repository contains **startup scripts, integration packages, and interactive tools** for the [Eagle](https://urn.to/r/eagle) scripting language.
 
