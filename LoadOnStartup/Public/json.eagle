@@ -1,0 +1,459 @@
+###############################################################################
+#
+# json.eagle --
+#
+# Extensible Adaptable Generalized Logic Engine (Eagle)
+# Eagle JSON Package File
+#
+# Copyright (c) 2007-2012 by Joe Mistachkin.  All rights reserved.
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: $
+#
+###############################################################################
+
+#
+# NOTE: Use our own namespace here because even though we do not directly
+#       support namespaces ourselves, we do not want to pollute the global
+#       namespace if this script actually ends up being evaluated in Tcl.
+#
+namespace eval ::Eagle {
+  #
+  # JSON node representations:
+  #
+  #   {object  {key valueNode key valueNode ...}}
+  #   {array   {valueNode valueNode ...}}
+  #   {string  <decoded string>}
+  #   {number  <original JSON number lexeme>}
+  #   {boolean true|false}
+  #   {null    $::null}
+  #
+  # This preserves:
+  #
+  #   * object versus array,
+  #   * string versus number versus boolean versus null,
+  #   * object member order, and
+  #   * duplicate object member names.
+  #
+  proc jsonToDictionary { json } {
+    return [jsonNodeToLegacy [jsonToValue $json]]
+  }
+
+  proc jsonToValue { json } {
+    set index 0
+    set result [jsonParseValue $json index]
+
+    jsonSkipWhitespace $json index
+    set length [string length $json]
+
+    if {$index < $length} {
+      error [appendArgs "unexpected trailing characters at index " $index]
+    }
+
+    return $result
+  }
+
+  proc jsonNode { type value } {
+    return [list $type $value]
+  }
+
+  proc jsonType { node } {
+    return [lindex $node 0]
+  }
+
+  proc jsonValue { node } {
+    return [lindex $node 1]
+  }
+
+  proc jsonNodeToLegacy { node } {
+    set type [jsonType $node]
+    set value [jsonValue $node]
+
+    switch -exact -- $type {
+      object {
+        set result [dict create]
+
+        foreach {key element} $value {
+          dict set result $key [jsonNodeToLegacy $element]
+        }
+
+        return $result
+      }
+      array {
+        set result [list]
+
+        foreach element $value {
+          lappend result [jsonNodeToLegacy $element]
+        }
+
+        return $result
+      }
+      string -
+      number -
+      boolean -
+      null {
+        return $value
+      }
+      default {
+        error [appendArgs "invalid JSON node type '" $type "'"]
+      }
+    }
+  }
+
+  proc jsonSkipWhitespace { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+
+    while {$index < $length} {
+      set character [string index $json $index]
+
+      if {$character ni [list \t \n \r " "]} {
+        break
+      }
+
+      incr index
+    }
+  }
+
+  proc jsonParseValue { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+    jsonSkipWhitespace $json index
+
+    if {$index >= $length} {
+      error "unexpected end of JSON input"
+    }
+
+    set character [string index $json $index]
+
+    switch -exact -- $character {
+      \" {
+        return [jsonNode string [jsonParseString $json index]]
+      }
+      \[ {
+        return [jsonParseArray $json index]
+      }
+      \{ {
+        return [jsonParseObject $json index]
+      }
+      t -
+      f {
+        return [jsonNode boolean [jsonParseBoolean $json index]]
+      }
+      n {
+        return [jsonNode null [jsonParseNull $json index]]
+      }
+      default {
+        if {$character eq "+" || $character eq "-" || \
+            [string is asciidigit -strict $character]} {
+          return [jsonNode number [jsonParseNumber $json index]]
+        }
+
+        error [appendArgs \
+            "unexpected character '" $character "' at index " $index]
+      }
+    }
+  }
+
+  proc jsonParseObject { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set result [list]
+
+    set length [string length $json]
+    incr index; # skip opening brace.
+    jsonSkipWhitespace $json index
+
+    if {$index < $length && [string index $json $index] eq "\}"} {
+      incr index; return [jsonNode object $result]
+    }
+
+    while {true} {
+      jsonSkipWhitespace $json index
+
+      if {$index >= $length || [string index $json $index] ne "\""} {
+        error [appendArgs "expected string key at index " $index]
+      }
+
+      set key [jsonParseString $json index]
+      jsonSkipWhitespace $json index
+
+      if {$index >= $length || [string index $json $index] ne ":"} {
+        error [appendArgs "expected ':' at index " $index]
+      }
+
+      incr index
+      lappend result $key [jsonParseValue $json index]
+      jsonSkipWhitespace $json index
+
+      if {$index >= $length} {
+        error "unexpected end of JSON input in object"
+      }
+
+      set character [string index $json $index]
+
+      if {$character eq "\}"} {
+        incr index; return [jsonNode object $result]
+      } elseif {$character eq ","} {
+        incr index
+      } else {
+        error [appendArgs "expected ',' or '\}' at index " $index]
+      }
+    }
+  }
+
+  proc jsonParseArray { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set result [list]
+
+    incr index; # skip opening bracket.
+    jsonSkipWhitespace $json index
+    set length [string length $json]
+
+    if {$index < $length && [string index $json $index] eq "\]"} {
+      incr index; return [jsonNode array $result]
+    }
+
+    while {true} {
+      lappend result [jsonParseValue $json index]
+      jsonSkipWhitespace $json index
+
+      if {$index >= $length} {
+        error "unexpected end of JSON input in array"
+      }
+
+      set character [string index $json $index]
+
+      if {$character eq "\]"} {
+        incr index; return [jsonNode array $result]
+      } elseif {$character eq ","} {
+        incr index
+      } else {
+        error [appendArgs "expected ',' or '\]' at index " $index]
+      }
+    }
+  }
+
+  proc jsonParseHexadecimalQuad { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+    set endIndex [expr {$index + 3}]
+
+    if {$endIndex >= $length} {
+      error [appendArgs "incomplete unicode escape at index " $index]
+    }
+
+    set digits [string range $json $index $endIndex]
+
+    if {![string is xdigit -strict $digits]} {
+      error [appendArgs "invalid unicode escape at index " $index]
+    }
+
+    incr index 4; return [expr {[appendArgs 0x $digits] + 0}]
+  }
+
+  proc jsonParseUnicodeEscape { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set codeUnit [jsonParseHexadecimalQuad $json index]
+
+    if {$codeUnit >= 0xD800 && $codeUnit <= 0xDBFF} {
+      set length [string length $json]
+
+      if {$index + 1 < $length && \
+          [string index $json $index] eq "\\" && \
+          [string index $json [expr {$index + 1}]] eq "u"} {
+        set savedIndex $index; incr index 2
+        set lowCodeUnit [jsonParseHexadecimalQuad $json index]
+
+        if {$lowCodeUnit >= 0xDC00 && $lowCodeUnit <= 0xDFFF} {
+          return [format %c%c $codeUnit $lowCodeUnit]
+        }
+
+        set index $savedIndex
+      }
+    }
+
+    return [format %c $codeUnit]
+  }
+
+  proc jsonParseString { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set startIndex $index
+    set result ""; incr index
+    set length [string length $json]
+
+    while {$index < $length} {
+      set character [string index $json $index]
+
+      if {$character eq "\""} {
+        incr index; return $result
+      } elseif {$character eq "\\"} {
+        incr index
+
+        if {$index >= $length} {
+          error "unexpected end of JSON input in string"
+        }
+
+        set escape [string index $json $index]
+
+        switch -exact -- $escape {
+          b  { append result \b }
+          t  { append result \t }
+          n  { append result \n }
+          v  { append result \v }
+          f  { append result \f }
+          r  { append result \r }
+          \" { append result \" }
+          /  { append result / }
+          \\ { append result \\ }
+          u  {
+            incr index
+            append result [jsonParseUnicodeEscape $json index]
+            continue
+          }
+          default {
+            error [appendArgs \
+                "unknown escape sequence '\\" $escape "' at index " $index]
+          }
+        }
+
+        incr index
+      } else {
+        set codePoint [string ordinal $character 0]
+
+        if {$codePoint < 0x20} {
+          error [appendArgs \
+              "unescaped control character at index " $index]
+        }
+
+        append result $character; incr index
+      }
+    }
+
+    error [appendArgs \
+        "unterminated string starting at index " $startIndex]
+  }
+
+  proc jsonParseNumber { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+    set startIndex $index
+
+    if {$index < $length} {
+      set character [string index $json $index]
+
+      if {$character eq "+" || $character eq "-"} {
+        incr index
+      }
+    }
+
+    if {$index >= $length} {
+      error [appendArgs "incomplete number at index " $startIndex]
+    }
+
+    set character [string index $json $index]
+
+    if {$character eq "0"} {
+      incr index
+
+      if {$index < $length && \
+          [string is asciidigit -strict [string index $json $index]]} {
+        error [appendArgs "leading zero not allowed at index " $index]
+      }
+    } elseif {[string is asciidigit -strict $character]} {
+      while {$index < $length && \
+             [string is asciidigit -strict [string index $json $index]]} {
+        incr index
+      }
+    } else {
+      error [appendArgs "expected digit at index " $index]
+    }
+
+    if {$index < $length && [string index $json $index] eq "."} {
+      incr index
+
+      if {$index >= $length || \
+          ![string is asciidigit -strict [string index $json $index]]} {
+        error [appendArgs \
+            "expected digit after decimal point at index " $index]
+      }
+
+      while {$index < $length && \
+             [string is asciidigit -strict [string index $json $index]]} {
+        incr index
+      }
+    }
+
+    if {$index < $length} {
+      set character [string index $json $index]
+
+      if {$character eq "e" || $character eq "E"} {
+        incr index
+
+        if {$index < $length} {
+          set character [string index $json $index]
+
+          if {$character eq "+" || $character eq "-"} {
+            incr index
+          }
+        }
+
+        if {$index >= $length || \
+            ![string is asciidigit -strict [string index $json $index]]} {
+          error [appendArgs "expected digit in exponent at index " $index]
+        }
+
+        while {$index < $length && \
+               [string is asciidigit -strict [string index $json $index]]} {
+          incr index
+        }
+      }
+    }
+
+    return [string range $json $startIndex [expr {$index - 1}]]
+  }
+
+  proc jsonParseBoolean { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+
+    if {$index + 3 < $length && \
+        [string range $json $index [expr {$index + 3}]] eq "true"} {
+      incr index 4; return true
+    } elseif {$index + 4 < $length && \
+        [string range $json $index [expr {$index + 4}]] eq "false"} {
+      incr index 5; return false
+    }
+
+    error [appendArgs "expected boolean literal at index " $index]
+  }
+
+  proc jsonParseNull { json indexVarName } {
+    upvar 1 $indexVarName index
+
+    set length [string length $json]
+
+    if {$index + 3 < $length && \
+        [string range $json $index [expr {$index + 3}]] eq "null"} {
+      incr index 4; return $::null
+    }
+
+    error [appendArgs "expected null literal at index " $index]
+  }
+
+  #
+  # NOTE: Provide the Eagle "json" package to the interpreter.
+  #
+  package provide Eagle.JSON \
+    [expr {[isEagle] ? [info engine PatchLevel] : "1.0"}]
+}

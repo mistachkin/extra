@@ -257,5 +257,24 @@ if {[isEagle]} then {
       }
     }
   }]
+
+  apply [list [list] {
+    if {![info exists ::no(NoUnsupportedCommands)] && \
+        ![info exists ::env(NoUnsupportedCommands)]} then {
+      set error null
+
+      set code [object invoke \
+          Eagle._Tests.Default TestAddUnsupportedCommands "" null error]
+
+      if {$code ne "Ok"} then {
+        error [getStringFromObjectHandle $error]
+      }
+
+      if {[info exists ::test_channel]} then {
+        tputs $::test_channel \
+            "---- added \"unsupported\" script command(s)\n"
+      }
+    }
+  }]
 }
 

@@ -40,5 +40,8 @@ package ifneeded Eagle.Licensing 1.0 \
 package ifneeded Eagle.Mathematica 1.0 \
     [list source -library true -- [file join $dir mathematica.eagle]]
 
+package ifneeded Eagle.JSON 1.0 \
+    [list source -library true -- [file join $dir json.eagle]]
+
 package ifneeded Zeus.Update 1.0 \
     [list source -library true -- [file join $dir checkUpdateZeusHook.eagle]]
