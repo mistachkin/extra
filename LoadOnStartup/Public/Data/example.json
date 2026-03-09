@@ -1,0 +1,126 @@
+{
+  "metadata": {
+    "title": "Eagle JSON Parser Test Data",
+    "version": "1.0",
+    "empty_object": {},
+    "empty_array": [],
+    "empty_string": ""
+  },
+
+  "string_escapes": {
+    "backslash": "a\\b",
+    "double_quote": "she said \"hello\"",
+    "forward_slash": "path/to/file",
+    "backspace": "back\bspace",
+    "form_feed": "form\ffeed",
+    "newline": "line1\nline2",
+    "carriage_return": "cr\rhere",
+    "tab": "col1\tcol2",
+    "vertical_tab": "vt\vthere",
+    "mixed": "line1\n\tindented \"quoted\" back\\slash"
+  },
+
+  "unicode_escapes": {
+    "latin": "\u00E9\u00E8\u00EA",
+    "copyright": "\u00A9 2026",
+    "snowman": "\u2603",
+    "cjk_character": "\u4E16\u754C",
+    "surrogate_pair_emoji": "\uD83D\uDE00",
+    "surrogate_pair_musical": "\uD834\uDD1E",
+    "null_escape": "\u0000",
+    "max_bmp": "\uFFFF",
+    "combining_marks": "e\u0301 n\u0303"
+  },
+
+  "numbers": {
+    "zero": 0,
+    "positive_integer": 42,
+    "negative_integer": -17,
+    "positive_sign": +99,
+    "large_integer": 9007199254740992,
+    "negative_large": -9007199254740992,
+    "simple_decimal": 3.14,
+    "negative_decimal": -0.001,
+    "leading_zero_decimal": 0.5,
+    "many_decimals": 2.718281828459045,
+    "exponent_lower": 1e10,
+    "exponent_upper": 1E10,
+    "exponent_positive": 6.022e+23,
+    "exponent_negative": 1.602e-19,
+    "negative_with_exponent": -9.8E+0,
+    "zero_exponent": 0e0,
+    "plus_with_exponent": +1.23E+4
+  },
+
+  "boolean_and_null": {
+    "is_true": true,
+    "is_false": false,
+    "nothing": null,
+    "list_of_nulls": [null, null, null]
+  },
+
+  "mixed_type_arrays": [
+    "a string",
+    42,
+    -3.14,
+    true,
+    false,
+    null,
+    {"inline": "object"},
+    [1, "two", null]
+  ],
+
+  "nested_structures": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "level4": {
+            "level5": {
+              "value": "deeply nested"
+            }
+          }
+        }
+      }
+    },
+    "array_of_objects": [
+      {"id": 1, "name": "first"},
+      {"id": 2, "name": "second"},
+      {"id": 3, "name": "third"}
+    ],
+    "object_with_arrays": {
+      "primes": [2, 3, 5, 7, 11, 13],
+      "flags": [true, false, true, true],
+      "matrix": [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+      ]
+    },
+    "array_of_arrays": [
+      [1, 2, 3],
+      ["a", "b", "c"],
+      [true, null, false]
+    ]
+  },
+
+  "duplicate_keys": {
+    "key": "first",
+    "key": "second",
+    "key": "third"
+  },
+
+  "whitespace_variations":	{
+    "tab_indented"  :   true   ,
+    "spaced_out"    :     [  1  ,  2  ,  3  ]
+  },
+
+  "edge_cases": {
+    "single_char": "x",
+    "digits_as_string": "12345",
+    "bool_as_string": "true",
+    "null_as_string": "null",
+    "nested_empty": {"a": {}, "b": [], "c": {"d": []}},
+    "long_string": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;':,./<>?",
+    "all_json_escapes_combined": "\"\\/\b\f\n\r\t"
+  }
+}

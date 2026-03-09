@@ -37,6 +37,16 @@ namespace eval ::Eagle {
   #   * object member order, and
   #   * duplicate object member names.
   #
+  proc jsonSelfTest {} {
+    set path [file dirname \
+        [info source [lindex [info level [info level]] 0]]]
+
+    set oldData [readUtf8BinaryFile [file join $path data example.dict]]
+    set newData [jsonToValue [readFile [file join $path data example.json]]]
+
+    return [expr {$newData eq $oldData}]
+  }
+
   proc jsonToDictionary { json } {
     return [jsonNodeToLegacy [jsonToValue $json]]
   }
@@ -48,8 +58,9 @@ namespace eval ::Eagle {
     jsonSkipWhitespace $json index
     set length [string length $json]
 
-    if {$index < $length} {
-      error [appendArgs "unexpected trailing characters at index " $index]
+    if {$index < $length} then {
+      error [appendArgs \
+          "unexpected trailing characters at index " $index]
     }
 
     return $result
@@ -110,7 +121,7 @@ namespace eval ::Eagle {
     while {$index < $length} {
       set character [string index $json $index]
 
-      if {$character ni [list \t \n \r " "]} {
+      if {$character ni [list \t \n \r " "]} then {
         break
       }
 
@@ -118,13 +129,22 @@ namespace eval ::Eagle {
     }
   }
 
-  proc jsonParseValue { json indexVarName } {
+  proc jsonParseValue { json indexVarName {depth 0} } {
+    variable jsonMaximumDepth
+
     upvar 1 $indexVarName index
+
+    if {[info exists jsonMaximumDepth] && \
+        $depth > $jsonMaximumDepth} then {
+      error [appendArgs \
+          "maximum nesting depth of " $jsonMaximumDepth \
+          " exceeded at index " $index]
+    }
 
     set length [string length $json]
     jsonSkipWhitespace $json index
 
-    if {$index >= $length} {
+    if {$index >= $length} then {
       error "unexpected end of JSON input"
     }
 
@@ -135,10 +155,10 @@ namespace eval ::Eagle {
         return [jsonNode string [jsonParseString $json index]]
       }
       \[ {
-        return [jsonParseArray $json index]
+        return [jsonParseArray $json index $depth]
       }
       \{ {
-        return [jsonParseObject $json index]
+        return [jsonParseObject $json index $depth]
       }
       t -
       f {
@@ -149,7 +169,7 @@ namespace eval ::Eagle {
       }
       default {
         if {$character eq "+" || $character eq "-" || \
-            [string is asciidigit -strict $character]} {
+            [string is asciidigit -strict $character]} then {
           return [jsonNode number [jsonParseNumber $json index]]
         }
 
@@ -159,7 +179,7 @@ namespace eval ::Eagle {
     }
   }
 
-  proc jsonParseObject { json indexVarName } {
+  proc jsonParseObject { json indexVarName depth } {
     upvar 1 $indexVarName index
 
     set result [list]
@@ -168,37 +188,37 @@ namespace eval ::Eagle {
     incr index; # skip opening brace.
     jsonSkipWhitespace $json index
 
-    if {$index < $length && [string index $json $index] eq "\}"} {
+    if {$index < $length && [string index $json $index] eq "\}"} then {
       incr index; return [jsonNode object $result]
     }
 
     while {true} {
       jsonSkipWhitespace $json index
 
-      if {$index >= $length || [string index $json $index] ne "\""} {
+      if {$index >= $length || [string index $json $index] ne "\""} then {
         error [appendArgs "expected string key at index " $index]
       }
 
       set key [jsonParseString $json index]
       jsonSkipWhitespace $json index
 
-      if {$index >= $length || [string index $json $index] ne ":"} {
+      if {$index >= $length || [string index $json $index] ne ":"} then {
         error [appendArgs "expected ':' at index " $index]
       }
 
       incr index
-      lappend result $key [jsonParseValue $json index]
+      lappend result $key [jsonParseValue $json index [expr {$depth + 1}]]
       jsonSkipWhitespace $json index
 
-      if {$index >= $length} {
+      if {$index >= $length} then {
         error "unexpected end of JSON input in object"
       }
 
       set character [string index $json $index]
 
-      if {$character eq "\}"} {
+      if {$character eq "\}"} then {
         incr index; return [jsonNode object $result]
-      } elseif {$character eq ","} {
+      } elseif {$character eq ","} then {
         incr index
       } else {
         error [appendArgs "expected ',' or '\}' at index " $index]
@@ -206,7 +226,7 @@ namespace eval ::Eagle {
     }
   }
 
-  proc jsonParseArray { json indexVarName } {
+  proc jsonParseArray { json indexVarName depth } {
     upvar 1 $indexVarName index
 
     set result [list]
@@ -215,23 +235,23 @@ namespace eval ::Eagle {
     jsonSkipWhitespace $json index
     set length [string length $json]
 
-    if {$index < $length && [string index $json $index] eq "\]"} {
+    if {$index < $length && [string index $json $index] eq "\]"} then {
       incr index; return [jsonNode array $result]
     }
 
     while {true} {
-      lappend result [jsonParseValue $json index]
+      lappend result [jsonParseValue $json index [expr {$depth + 1}]]
       jsonSkipWhitespace $json index
 
-      if {$index >= $length} {
+      if {$index >= $length} then {
         error "unexpected end of JSON input in array"
       }
 
       set character [string index $json $index]
 
-      if {$character eq "\]"} {
+      if {$character eq "\]"} then {
         incr index; return [jsonNode array $result]
-      } elseif {$character eq ","} {
+      } elseif {$character eq ","} then {
         incr index
       } else {
         error [appendArgs "expected ',' or '\]' at index " $index]
@@ -245,13 +265,13 @@ namespace eval ::Eagle {
     set length [string length $json]
     set endIndex [expr {$index + 3}]
 
-    if {$endIndex >= $length} {
+    if {$endIndex >= $length} then {
       error [appendArgs "incomplete unicode escape at index " $index]
     }
 
     set digits [string range $json $index $endIndex]
 
-    if {![string is xdigit -strict $digits]} {
+    if {![string is xdigit -strict $digits]} then {
       error [appendArgs "invalid unicode escape at index " $index]
     }
 
@@ -259,24 +279,39 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseUnicodeEscape { json indexVarName } {
+    variable jsonStrictUnicode
+
     upvar 1 $indexVarName index
 
+    set startIndex $index
     set codeUnit [jsonParseHexadecimalQuad $json index]
 
-    if {$codeUnit >= 0xD800 && $codeUnit <= 0xDBFF} {
+    if {$codeUnit >= 0xD800 && $codeUnit <= 0xDBFF} then {
       set length [string length $json]
 
       if {$index + 1 < $length && \
           [string index $json $index] eq "\\" && \
-          [string index $json [expr {$index + 1}]] eq "u"} {
+          [string index $json [expr {$index + 1}]] eq "u"} then {
         set savedIndex $index; incr index 2
         set lowCodeUnit [jsonParseHexadecimalQuad $json index]
 
-        if {$lowCodeUnit >= 0xDC00 && $lowCodeUnit <= 0xDFFF} {
+        if {$lowCodeUnit >= 0xDC00 && $lowCodeUnit <= 0xDFFF} then {
           return [format %c%c $codeUnit $lowCodeUnit]
         }
 
         set index $savedIndex
+      }
+
+      if {[info exists jsonStrictUnicode] && \
+          [string is true -strict $jsonStrictUnicode]} then {
+        error [appendArgs \
+            "unpaired high surrogate at index " $startIndex]
+      }
+    } elseif {$codeUnit >= 0xDC00 && $codeUnit <= 0xDFFF} then {
+      if {[info exists jsonStrictUnicode] && \
+          [string is true -strict $jsonStrictUnicode]} then {
+        error [appendArgs \
+            "unpaired low surrogate at index " $startIndex]
       }
     }
 
@@ -293,12 +328,12 @@ namespace eval ::Eagle {
     while {$index < $length} {
       set character [string index $json $index]
 
-      if {$character eq "\""} {
+      if {$character eq "\""} then {
         incr index; return $result
-      } elseif {$character eq "\\"} {
+      } elseif {$character eq "\\"} then {
         incr index
 
-        if {$index >= $length} {
+        if {$index >= $length} then {
           error "unexpected end of JSON input in string"
         }
 
@@ -329,7 +364,7 @@ namespace eval ::Eagle {
       } else {
         set codePoint [string ordinal $character 0]
 
-        if {$codePoint < 0x20} {
+        if {$codePoint < 0x20} then {
           error [appendArgs \
               "unescaped control character at index " $index]
         }
@@ -348,28 +383,28 @@ namespace eval ::Eagle {
     set length [string length $json]
     set startIndex $index
 
-    if {$index < $length} {
+    if {$index < $length} then {
       set character [string index $json $index]
 
-      if {$character eq "+" || $character eq "-"} {
+      if {$character eq "+" || $character eq "-"} then {
         incr index
       }
     }
 
-    if {$index >= $length} {
+    if {$index >= $length} then {
       error [appendArgs "incomplete number at index " $startIndex]
     }
 
     set character [string index $json $index]
 
-    if {$character eq "0"} {
+    if {$character eq "0"} then {
       incr index
 
       if {$index < $length && \
-          [string is asciidigit -strict [string index $json $index]]} {
+          [string is asciidigit -strict [string index $json $index]]} then {
         error [appendArgs "leading zero not allowed at index " $index]
       }
-    } elseif {[string is asciidigit -strict $character]} {
+    } elseif {[string is asciidigit -strict $character]} then {
       while {$index < $length && \
              [string is asciidigit -strict [string index $json $index]]} {
         incr index
@@ -378,11 +413,11 @@ namespace eval ::Eagle {
       error [appendArgs "expected digit at index " $index]
     }
 
-    if {$index < $length && [string index $json $index] eq "."} {
+    if {$index < $length && [string index $json $index] eq "."} then {
       incr index
 
       if {$index >= $length || \
-          ![string is asciidigit -strict [string index $json $index]]} {
+          ![string is asciidigit -strict [string index $json $index]]} then {
         error [appendArgs \
             "expected digit after decimal point at index " $index]
       }
@@ -393,22 +428,22 @@ namespace eval ::Eagle {
       }
     }
 
-    if {$index < $length} {
+    if {$index < $length} then {
       set character [string index $json $index]
 
-      if {$character eq "e" || $character eq "E"} {
+      if {$character eq "e" || $character eq "E"} then {
         incr index
 
-        if {$index < $length} {
+        if {$index < $length} then {
           set character [string index $json $index]
 
-          if {$character eq "+" || $character eq "-"} {
+          if {$character eq "+" || $character eq "-"} then {
             incr index
           }
         }
 
         if {$index >= $length || \
-            ![string is asciidigit -strict [string index $json $index]]} {
+            ![string is asciidigit -strict [string index $json $index]]} then {
           error [appendArgs "expected digit in exponent at index " $index]
         }
 
@@ -428,10 +463,10 @@ namespace eval ::Eagle {
     set length [string length $json]
 
     if {$index + 3 < $length && \
-        [string range $json $index [expr {$index + 3}]] eq "true"} {
+        [string range $json $index [expr {$index + 3}]] eq "true"} then {
       incr index 4; return true
     } elseif {$index + 4 < $length && \
-        [string range $json $index [expr {$index + 4}]] eq "false"} {
+        [string range $json $index [expr {$index + 4}]] eq "false"} then {
       incr index 5; return false
     }
 
@@ -444,8 +479,14 @@ namespace eval ::Eagle {
     set length [string length $json]
 
     if {$index + 3 < $length && \
-        [string range $json $index [expr {$index + 3}]] eq "null"} {
-      incr index 4; return $::null
+        [string range $json $index [expr {$index + 3}]] eq "null"} then {
+      incr index 4
+
+      if {[info exists ::null]} then {
+        return $::null
+      } else {
+        return ""
+      }
     }
 
     error [appendArgs "expected null literal at index " $index]
