@@ -41,10 +41,22 @@ namespace eval ::Eagle {
     set path [file dirname \
         [info source [lindex [info level [info level]] 0]]]
 
-    set oldData [readUtf8BinaryFile [file join $path data example.dict]]
-    set newData [jsonToValue [readFile [file join $path data example.json]]]
+    foreach fileNameOnly [list example example.strict] {
+      set dictFileName [file join \
+          $path data [appendArgs $fileNameOnly .dict]]
 
-    return [expr {$newData eq $oldData}]
+      set jsonFileName [file join \
+          $path data [appendArgs $fileNameOnly .json]]
+
+      set oldData [readUtf8BinaryFile $dictFileName]
+      set newData [jsonToValue [readFile $jsonFileName]]
+
+      if {$newData ne $oldData} then {
+        return false
+      }
+    }
+
+    return true
   }
 
   proc jsonToDictionary { json } {

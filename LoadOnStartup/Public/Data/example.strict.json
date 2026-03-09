@@ -16,7 +16,6 @@
     "newline": "line1\nline2",
     "carriage_return": "cr\rhere",
     "tab": "col1\tcol2",
-    "vertical_tab": "vt\vthere",
     "mixed": "line1\n\tindented \"quoted\" back\\slash"
   },
 
@@ -36,7 +35,6 @@
     "zero": 0,
     "positive_integer": 42,
     "negative_integer": -17,
-    "positive_sign": +99,
     "large_integer": 9007199254740992,
     "negative_large": -9007199254740992,
     "simple_decimal": 3.14,
@@ -48,8 +46,7 @@
     "exponent_positive": 6.022e+23,
     "exponent_negative": 1.602e-19,
     "negative_with_exponent": -9.8E+0,
-    "zero_exponent": 0e0,
-    "plus_with_exponent": +1.23E+4
+    "zero_exponent": 0e0
   },
 
   "boolean_and_null": {
@@ -121,6 +118,6 @@
     "null_as_string": "null",
     "nested_empty": {"a": {}, "b": [], "c": {"d": []}},
     "long_string": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;':,./<>?",
-    "all_json_escapes_combined": "\b\t\n\v\f\r\"/\\"
+    "all_json_escapes_combined": "\b\t\n\f\r\"/\\"
   }
 }
