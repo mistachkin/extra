@@ -488,9 +488,38 @@ namespace eval :: {
     }
   }
 
+  proc eagle_getNativeDirectoryName {} {
+    if {[isWindows]} then {
+      set part1 win
+    } elseif {[isMacOS]} then {
+      set part1 osx
+    } elseif {[info exists ::tcl_platform(os)] && \
+        $::tcl_platform(os) eq "Linux"} then {
+      set part1 linux
+    } else {
+      set part1 ""
+    }
+
+    package require Eagle.Test
+
+    if {[info exists ::tcl_platform(machine)]} then {
+      set part2 [architectureForPlatform $::tcl_platform(machine)]
+    } else {
+      set part2 ""
+    }
+
+    return [join [list $part1 $part2] -]
+  }
+
   proc eagle_getSQLiteBinaryFileName {} {
     set fileName [file join [file dirname \
-        [getShellExecutableName]] SQLite.Interop.dll]
+        [getShellExecutableName]] runtimes \
+        win-x64 native SQLite.Interop.dll]
+
+    if {![file exists $fileName]} then {
+      set fileName [file join [file dirname \
+          [getShellExecutableName]] SQLite.Interop.dll]
+    }
 
     if {![file trusted $fileName]} then {
       error [appendArgs \
