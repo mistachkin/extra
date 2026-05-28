@@ -21,6 +21,35 @@
 #
 namespace eval ::Eagle {
   proc haveExecOptionTag { optionsVarName tag } {
+    # <help>
+    # This procedure tests whether the caller's options array contains the
+    # specified user tag in its -tags element.  It exists as a small,
+    # reusable predicate that the pipeline machinery can consult when it
+    # needs to vary its behavior based on caller-supplied tags without
+    # each call site repeating the existence-plus-membership boilerplate.
+    #
+    # How it works: it imports the caller's array via [upvar 1] under the
+    # local name "options", verifies that the -tags element exists, and
+    # then performs an exact (non-glob, non-regexp) [lsearch] for the
+    # requested tag within that element's list value.
+    #
+    # Tricky details: the array variable is taken by name from the
+    # caller's frame, so this routine must be called only from within a
+    # procedure that has the array set up appropriately.  Matching is
+    # exact and case-sensitive.
+    #
+    # Arguments:
+    #   optionsVarName -- The name (not value) of an array variable in
+    #                     the caller's frame, expected to hold the parsed
+    #                     option set.
+    #   tag            -- The tag value to look for in the array's -tags
+    #                     element.
+    #
+    # Results:
+    #   True when -tags exists in the array and the tag is one of its
+    #   elements; false otherwise.
+    # </help>
+
     upvar 1 $optionsVarName options
 
     if {![info exists options(-tags)]} then {
@@ -35,6 +64,54 @@ namespace eval ::Eagle {
   }
 
   proc createExecSubCommandList { optionsVarName args } {
+    # <help>
+    # This procedure parses a flat argument list that describes a shell-
+    # style pipeline (with a literal "|" separator between stages and an
+    # optional trailing "&" for background execution) into a list of
+    # per-stage sub-commands, each of which is itself a list of words.
+    # It is the first parsing pass performed by [execWithPipes] and
+    # separates the user's command stream into the discrete commands that
+    # will eventually be wired together with intermediate input and
+    # output buffers.
+    #
+    # How it works: it imports the caller's options array via [upvar 1]
+    # so that side effects (specifically setting -background) can be
+    # recorded on it.  It then walks "args" from left to right, building
+    # a current sub-command word list and pushing it onto the result
+    # whenever a pipe separator is encountered.  A pipe at the very
+    # start or end of the argument list is rejected as a syntax error,
+    # as is a pipe that immediately follows another pipe -- which would
+    # leave the previous sub-command empty.  A trailing "&" as the final
+    # argument is consumed and recorded by setting the -background
+    # element of the options array to the index at which it appeared,
+    # rather than being added to the current sub-command.  Within each
+    # sub-command, the literal escape sequences double-pipe and double-
+    # ampersand are mapped back to single pipe and single ampersand
+    # tokens so that callers can include those characters in command
+    # arguments without invoking the pipeline or background syntax.
+    # Once the walk is complete, any non-empty trailing sub-command is
+    # pushed onto the result.
+    #
+    # Tricky details: this routine works at the level of words that have
+    # already been split by the caller; it does not perform any shell-
+    # like tokenization.  The escape mapping for literal pipe and
+    # ampersand characters is applied per-argument, so an argument that
+    # is the bare two-character string double-pipe becomes the single
+    # character pipe in the resulting sub-command list.
+    #
+    # Arguments:
+    #   optionsVarName -- The name of an options array variable in the
+    #                     caller's frame.  May have its -background
+    #                     element written to by this routine.
+    #   args           -- The raw pipeline word list.  May contain "|"
+    #                     and a trailing "&" as control tokens.
+    #
+    # Results:
+    #   A list of sub-commands, where each sub-command is itself a list
+    #   of words ready to be passed to [::exec].  An error is raised if
+    #   the pipe separator is used in an invalid position.
+    # </help>
+
     upvar 1 $optionsVarName options
 
     set subCommands [list]; set subCommand [list]
@@ -71,6 +148,35 @@ namespace eval ::Eagle {
 
   proc checkForDisallowedExecCommandListOptions {
           optionsVarName captureOptions } {
+    # <help>
+    # This procedure verifies that the caller's parsed options array does
+    # not contain any options that would be incompatible with running a
+    # multi-stage pipeline.  It exists to keep the pipeline driver honest:
+    # certain [exec] options request that output be captured in a
+    # particular way, and those modes cannot be honored when this package
+    # is itself capturing stdout and stderr at each stage in order to wire
+    # them into the next stage's stdin.
+    #
+    # How it works: it imports the caller's options array via [upvar 1]
+    # and iterates over the supplied capture-options collection, which is
+    # an object dictionary of disallowed option name to option metadata.
+    # For each entry, it consults the array for an element whose name
+    # matches the entry's key; if such an element exists, the routine
+    # raises an error identifying the offending option name.  When all
+    # entries pass, the routine returns without producing a value.
+    #
+    # Arguments:
+    #   optionsVarName -- The name of an options array variable in the
+    #                     caller's frame.
+    #   captureOptions -- An object handle to an enumerable of key/value
+    #                     pairs whose keys are the option names that must
+    #                     not appear in the array.
+    #
+    # Results:
+    #   The empty string on success.  An error is raised on the first
+    #   disallowed option that is found.
+    # </help>
+
     upvar 1 $optionsVarName options
 
     object foreach -alias pair $captureOptions {
@@ -85,6 +191,62 @@ namespace eval ::Eagle {
 
   proc createExecCommandList {
           sentinel optionsVarName captureOptions subCommands } {
+    # <help>
+    # This procedure takes the parsed list of pipeline sub-commands and
+    # turns it into a list of fully-constructed [::exec] invocations,
+    # ready to be evaluated stage by stage.  It is the second parsing
+    # pass performed by [execWithPipes] and is responsible for attaching
+    # the user-supplied [exec] options to each invocation, wiring up the
+    # per-stage standard input, standard output, and standard error
+    # capture variables, and validating that the caller has not asked
+    # for an option that conflicts with pipelining.
+    #
+    # How it works: after first delegating to the disallowed-option check
+    # to fail fast on incompatible options, the routine collects the set
+    # of option names that should be propagated to every stage,
+    # excluding "--", "-stdin", "-stdout", and "-stderr" which it handles
+    # itself.  For each sub-command index, it builds an [::exec]
+    # invocation, appends each propagated option (using a single
+    # sentinel string to mark options whose presence-only form was used,
+    # so the option appears as a flag rather than a flag-and-value
+    # pair), and then appends the per-stage capture wiring.  Specifically,
+    # every stage after the first (and the very first stage when the
+    # caller supplied a -stdin) has its -stdin pointed at a per-index
+    # localStandardInput array element, and every stage has its -stdout
+    # and -stderr pointed at per-index standardOutput and standardError
+    # array elements.  Finally, the sub-command's own words are appended
+    # after a literal "--" terminator.  Each sub-command is checked for
+    # being a proper Tcl list before being expanded, and a precise error
+    # message is raised otherwise.
+    #
+    # Tricky details: the per-stage capture variables are referenced by
+    # name only at this stage -- they will not actually exist until the
+    # runner brings them into being -- so the constructed commands embed
+    # the names of variables that live in the runner's frame.  The
+    # sentinel mechanism allows boolean-style options (those that are
+    # simply present or absent rather than carrying a value) to be
+    # distinguished from valued options: when an option's stored value
+    # equals the sentinel, only the option name is appended; otherwise
+    # the name and the value are both appended.
+    #
+    # Arguments:
+    #   sentinel       -- A transient marker string that the caller has
+    #                     used to indicate "this option was present but
+    #                     carried no value".
+    #   optionsVarName -- The name of the parsed options array in the
+    #                     caller's frame.
+    #   captureOptions -- An object handle to the set of options that
+    #                     are disallowed in pipelines (forwarded to the
+    #                     disallowed-option check).
+    #   subCommands    -- The list of per-stage word lists produced by
+    #                     [createExecSubCommandList].
+    #
+    # Results:
+    #   A list of fully-constructed [::exec] invocations, one per stage,
+    #   in pipeline order.  An error is raised when a disallowed option
+    #   is present or when a sub-command is not a proper list.
+    # </help>
+
     upvar 1 $optionsVarName options
 
     checkForDisallowedExecCommandListOptions options $captureOptions
@@ -133,6 +295,76 @@ namespace eval ::Eagle {
   proc runExecCommandList {
           optionsVarName commands {savedStandardOutputVarName ""}
           {savedStandardErrorVarName ""} } {
+    # <help>
+    # This procedure actually runs the constructed pipeline by evaluating
+    # each [::exec] invocation in sequence, taking care to thread the
+    # standard output of each stage into the standard input of the next,
+    # and -- when requested by a runtime option -- also threading the
+    # standard error of each stage into the next stage's standard input.
+    # It is the final phase performed by [execWithPipes] and is where
+    # the captured per-stage I/O is materialized.
+    #
+    # How it works: the parsed options array is fetched from the
+    # immediate caller's frame via [downlevel] and a local copy is made
+    # so subsequent option lookups are cheap.  If the caller supplied a
+    # name for a saved-standard-output array variable, that variable is
+    # imported via [upvar 1] and is required to be either unset or an
+    # array (a scalar value is rejected with an error); the saved
+    # standard-error variable is treated identically.  For each stage
+    # index in order, a per-stage localStandardInput element is computed
+    # when the stage is not the first or when the caller supplied a
+    # -stdin option: for non-first stages, it is the previous stage's
+    # captured standardOutput element (and, when the runtime option
+    # execPipesWithStandardError is set, the previous stage's
+    # standardError element appended to it); for the first stage, it is
+    # the value of the variable named by the caller's -stdin option,
+    # looked up in the original caller's frame via [uplevel 1] and
+    # tolerated as the empty string if that variable does not exist.
+    # The stage's [::exec] invocation is then evaluated, optionally
+    # logged via [tclLog] when the traceRunExecCommandList runtime
+    # option is set, and its result is stashed in a per-stage result
+    # array element; any error raised by [::exec] propagates out of this
+    # routine.  After each stage, the captured standardOutput is copied
+    # into the caller's -stdout target variable (only at the very last
+    # stage) and into the saved-output array when one was provided; the
+    # standardError is handled symmetrically.  When all stages have run
+    # successfully, the result of the last stage is returned.
+    #
+    # Tricky details: the routine reaches across two frames -- it pulls
+    # the options array from the immediate caller (the dispatcher) but
+    # reads and writes user-supplied -stdin, -stdout, and -stderr
+    # variables in the dispatcher's caller's frame via [uplevel 1] so
+    # that the user sees the expected variable semantics.  The saved-
+    # output and saved-error arrays exist purely as a diagnostic aid
+    # enabled by the saveExecWithPipes runtime option and are populated
+    # in the dispatcher's caller's frame regardless of whether the
+    # corresponding -stdout or -stderr option was passed.  A missing
+    # last-stage result triggers an error mentioning the offending
+    # index.
+    #
+    # Arguments:
+    #   optionsVarName              -- The name of the parsed options
+    #                                  array variable in the immediate
+    #                                  caller's frame.
+    #   commands                    -- The list of per-stage [::exec]
+    #                                  invocations produced by
+    #                                  [createExecCommandList].
+    #   savedStandardOutputVarName  -- Optional name (default empty) of
+    #                                  an array variable in the caller's
+    #                                  caller's frame that will receive
+    #                                  the captured per-stage standard
+    #                                  output keyed by stage index.
+    #   savedStandardErrorVarName   -- Optional name (default empty) of
+    #                                  the corresponding saved per-stage
+    #                                  standard error array variable.
+    #
+    # Results:
+    #   The result of evaluating the final stage's [::exec] command.  An
+    #   error is raised when a saved-output target exists but is not an
+    #   array, when any stage's [::exec] fails, or when the final stage
+    #   produced no captured result.
+    # </help>
+
     array set options [downlevel [list array get $optionsVarName]]
 
     if {[string length $savedStandardOutputVarName] > 0} then {
@@ -224,6 +456,77 @@ namespace eval ::Eagle {
   }
 
   proc execWithPipes { args } {
+    # <help>
+    # This procedure is the public entry point of the pipes package.  It
+    # accepts the same arguments as the built-in [::exec] command, plus a
+    # pipeline syntax in which a literal "|" between word groups separates
+    # the stages of a pipeline and an optional trailing "&" requests
+    # background execution.  It exists to provide a Tcl-style pipeline
+    # facility on top of Eagle's [::exec], which natively supports only
+    # single commands.  Internally it parses the user's option flags,
+    # splits the remaining words into per-stage sub-commands, builds a
+    # list of fully-constructed [::exec] invocations, and finally runs
+    # them in order while wiring the captured standard output (and,
+    # optionally, the captured standard error) of each stage into the
+    # standard input of the next.
+    #
+    # How it works: when called with no arguments, it raises a usage
+    # error.  Otherwise it obtains a handle to the active interpreter,
+    # asks Eagle's internal object operations for the full set of
+    # supported [exec] options, and extracts the subset of those options
+    # that pertain to output capture (so they can be flagged as
+    # incompatible with pipelining further down the line).  The user's
+    # raw arguments are then wrapped in a managed ArgumentList, the
+    # procedure name itself is inserted at position zero so that error
+    # reporting from the option parser matches what the user typed, and
+    # the interpreter's option parser is invoked to consume the leading
+    # options.  A parsing failure is propagated as an Eagle error; a
+    # successful parse that consumed no positional argument is reported
+    # as a usage error.  Each parsed option is then read out, with
+    # presence-only options recorded under a freshly generated transient
+    # sentinel string so that downstream code can tell them apart from
+    # options that carry a value; opaque object-handle option values
+    # (such as callbacks or secure strings) are stored as-is rather than
+    # stringified.  The remaining positional arguments are then handed
+    # to the sub-command splitter, the per-stage [::exec] invocations
+    # are constructed, and -- when the saveExecWithPipes runtime option
+    # is set -- diagnostic saved-output and saved-error array variables
+    # are designated.  Finally the runner is invoked via [uplevel 1] so
+    # that any -stdin, -stdout, -stderr, or saved-output variables the
+    # user named are resolved against the original caller's frame; the
+    # runner's result is returned.
+    #
+    # Tricky details: this routine straddles the boundary between
+    # Eagle's managed option-parsing machinery and ordinary Tcl-style
+    # list manipulation, so it has to translate carefully between the
+    # two.  The transient sentinel is constructed from a pseudo-random
+    # hex integer and is used purely as an in-memory marker; it is not
+    # exposed to callers.  The argument index returned by the option
+    # parser is decremented by one before the sub-command splitter is
+    # invoked so that the "--" terminator and the first positional word
+    # are both included.  Because the runner is launched at [uplevel 1],
+    # callers see the user-supplied I/O variables created or updated in
+    # their own frame, exactly as if [::exec] had been called directly.
+    #
+    # Arguments:
+    #   args -- Zero or more option flags accepted by [::exec], followed
+    #           by one or more positional words specifying the pipeline.
+    #           Use "|" between word groups to separate pipeline stages
+    #           and a trailing "&" to request background execution.  The
+    #           output-capture options that conflict with pipelining
+    #           (e.g. those that direct the entire stdout to a single
+    #           variable in a way that bypasses the per-stage wiring)
+    #           are rejected with an error.
+    #
+    # Results:
+    #   The result of evaluating the final stage's [::exec] command, as
+    #   returned by the runner.  An error is raised when the argument
+    #   list is empty, when option parsing fails, when no positional
+    #   argument is supplied, when a disallowed option is present, when
+    #   the pipeline syntax is invalid, or when any pipeline stage
+    #   itself fails.
+    # </help>
+
     set wrongNumArgs [string trim {
       wrong # args: should be "execWithPipes ?options? arg ?arg ...?"
     }]

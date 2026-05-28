@@ -25,6 +25,46 @@
 #
 namespace eval ::Eagle {
   proc getSubKeyNames { keyName } {
+    # <help>
+    # This procedure returns the list of immediate sub-key names that live
+    # underneath the specified Windows registry key beneath HKEY_LOCAL_MACHINE.
+    # It exists as a small Windows-registry helper for the surrounding
+    # Mathematica-integration code, which uses it to enumerate the installed
+    # Wolfram Mathematica versions in order to locate the .NETLink assembly to
+    # load.  It is intentionally narrow in scope (no recursion, no values, no
+    # alternate hives) because the calling code only needs a single level of
+    # sub-key names under HKLM.
+    #
+    # How it works: it opens HKEY_LOCAL_MACHINE via the static
+    # Microsoft.Win32.Registry.LocalMachine property (wrapped as an aliased
+    # object handle so that subsequent CLR member calls can be made using
+    # command syntax), then calls OpenSubKey on the specified key path to get
+    # a handle to the sub-key, and finally returns the result of GetSubKeyNames
+    # on that handle.  Both object handles are aliased so their members can be
+    # invoked directly as commands, and a finally block disposes them by
+    # unsetting the variables that hold their handles -- the [unset] of an
+    # Eagle opaque object handle releases the underlying CLR reference.
+    #
+    # Tricky details: this is Windows-only code; on other platforms the
+    # Microsoft.Win32.Registry class is not available and the call will fail.
+    # The two handles are initialized to the empty string before the [try]
+    # block so the finally clause can safely check for "real" handles before
+    # disposing.  The procedure deliberately handles only HKLM; supporting
+    # other hives would require a parameter that is not currently needed by
+    # the calling code.
+    #
+    # Arguments:
+    #   keyName -- The registry path of the parent key, relative to the
+    #              HKEY_LOCAL_MACHINE root (e.g. backslash-separated path
+    #              under HKLM), whose immediate sub-key names should be
+    #              returned.
+    #
+    # Results:
+    #   A list of the immediate sub-key names of the specified parent key.
+    #   If the parent key does not exist or cannot be opened, the call will
+    #   raise an error from the underlying CLR invocation.
+    # </help>
+
     set rootKey ""; set subKey ""
 
     try {
@@ -50,6 +90,59 @@ namespace eval ::Eagle {
   }
 
   proc mathematica { expr } {
+    # <help>
+    # This procedure evaluates the specified Wolfram Mathematica expression by
+    # spinning up a Mathematica kernel via the .NETLink interop assembly and
+    # returns the textual OutputForm of the result.  It exists to make the
+    # full power of an installed Mathematica kernel reachable from Eagle
+    # scripts with a single call, hiding the .NETLink boilerplate (assembly
+    # loading, kernel link creation, error retrieval, and disposal) from the
+    # caller.
+    #
+    # How it works: on Windows, it asks the registry helper [getSubKeyNames]
+    # for the installed Mathematica versions beneath
+    # HKLM Software Wolfram Research Installations, picks the first
+    # installation, reads its ExecutablePath value, and uses the containing
+    # directory to construct the full path to Wolfram.NETLink.dll under
+    # SystemFiles Links NETLink.  That assembly is then loaded with
+    # [object load -import -loadtype file].  On non-Windows platforms, the
+    # assembly is loaded by short name only ("Wolfram.NETLink") -- a TODO
+    # in the body notes that a more explicit lookup would be desirable.
+    # After the assembly is loaded, MathLinkFactory.CreateKernelLink is used
+    # to start a kernel link, WaitAndDiscardAnswer absorbs the kernel's
+    # initial banner, and EvaluateToOutputForm is called with the expression
+    # and a page width of 0.  If the resulting object handle is non-null its
+    # string value is returned; otherwise LastError is queried from the
+    # kernel and reported as an Eagle error (with a generic "<unknown>"
+    # fallback when even LastError yields nothing).  A finally block closes
+    # and unsets the kernel handle so the kernel process is not left
+    # running.
+    #
+    # Tricky details: the Windows path picks the FIRST installation returned
+    # by the registry enumeration, so on machines with multiple Mathematica
+    # versions the choice is effectively arbitrary.  The kernel is created
+    # fresh on every call (no caching), which is simple but expensive --
+    # callers that need many evaluations may want to factor this differently.
+    # The result handle is interpreted via [isNonNullObjectHandle] and
+    # [getStringFromObjectHandle] (defined elsewhere in the Eagle library); a
+    # null handle is the .NETLink convention for "evaluation failed".  The
+    # kernel link is closed in the finally block only when the [info exists]
+    # check confirms it was actually created, so a failure to even create the
+    # kernel will not produce a secondary error during cleanup.
+    #
+    # Arguments:
+    #   expr -- A Mathematica expression source string to send to the kernel
+    #           for evaluation.  No additional quoting is performed; the
+    #           string is passed through to EvaluateToOutputForm verbatim.
+    #
+    # Results:
+    #   The textual OutputForm of the evaluation result as returned by the
+    #   Mathematica kernel.  If the kernel reports an evaluation error, an
+    #   Eagle error is raised whose message begins with "Mathematica error:"
+    #   followed by the kernel's last error text (or "<unknown>" when no
+    #   text is available).
+    # </help>
+
     if {[isWindows]} then {
       set baseKeyName {Software\Wolfram Research\Installations}
       set keyName [lindex [getSubKeyNames $baseKeyName] 0]

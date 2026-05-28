@@ -20,6 +20,39 @@
 #
 namespace eval :: {
   proc checkStringBuilderCache { {patchLevel 1.0.8370.0} } {
+    # <help>
+    # This procedure enables the Eagle StringBuilder caching subsystem when
+    # the running Eagle interpreter is newer than the specified baseline
+    # patch level and the optional caching command is available.  It exists
+    # to opt-in to a performance optimization in modern Eagle builds without
+    # breaking when the script is loaded into an older build (or into Tcl)
+    # that does not provide the caching command.
+    #
+    # How it works: it first checks that this is really Eagle (not Tcl) and
+    # that the running patch level is strictly newer than the baseline (the
+    # helper [checkEaglePatchLevel] returns true when the running version is
+    # less than or equal to the argument, so the result is negated here).
+    # If both conditions hold and the special bracket-cache-on command is
+    # registered, it invokes that command in the caller's frame to turn on
+    # caching with the documented flag arrangement.
+    #
+    # Tricky details: the command name begins with a hash character and is
+    # therefore invoked with a backslash escape so the Tcl parser does not
+    # treat it as a comment.  Invocation is done via uplevel 1 so the cache
+    # command sees the caller's context, which matters because some forms
+    # of cache state are tracked per call frame.
+    #
+    # Arguments:
+    #   patchLevel -- Optional minimum Eagle patch level (a version string).
+    #                 When the running interpreter's patch level is at or
+    #                 below this value, caching is NOT enabled.  Defaults to
+    #                 the first build that shipped the caching command.
+    #
+    # Results:
+    #   The result of the cache-enable command when it is invoked, or the
+    #   empty string when nothing is done.
+    # </help>
+
     if {[checkIsEagle] && \
         ![checkEaglePatchLevel $patchLevel] &&
         [llength [info commands #cacheon]] > 0} then {
@@ -28,12 +61,53 @@ namespace eval :: {
   }
 
   proc checkIsWindows {} {
+    # <help>
+    # This procedure installs a fallback definition of the global [isWindows]
+    # procedure when the running interpreter does not already provide one.
+    # It exists as a pre-beta-29 compatibility shim, so that downstream
+    # scripts can call [isWindows] unconditionally without first checking the
+    # Eagle (or Tcl) version they are running under.
+    #
+    # How it works: it asks the interpreter whether a proc named [isWindows]
+    # is already defined.  If not, it defines one in the global namespace.
+    # The fallback definition consults the standard tcl_platform array and
+    # returns true exactly when the platform element is the string
+    # "windows".  When [isWindows] is already present (newer Eagle, or some
+    # other initialization has supplied it), this procedure does nothing.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the inner proc command when the shim is installed, or
+    #   the empty string when nothing is done.
+    # </help>
+
     #
     # NOTE: This is a pre-beta 29 compatibility shim for the
     #       [isWindows] script library procedure.
     #
     if {[llength [info procs isWindows]] == 0} then {
       proc isWindows {} {
+        # <help>
+        # This procedure reports whether the host operating system is a
+        # member of the Windows family, as a stand-in for the built-in
+        # [isWindows] that exists in newer Eagle builds.  It is installed by
+        # the surrounding compatibility shim only when it is missing.
+        #
+        # How it works: it reads the global tcl_platform(platform) element
+        # and compares it for exact equality (the case-sensitive eq
+        # operator) against the literal "windows".  When the element is
+        # absent (extremely unusual) the result is false.
+        #
+        # Arguments:
+        #   None.
+        #
+        # Results:
+        #   True when the platform element is the string "windows"; false
+        #   otherwise.
+        # </help>
+
         return [expr {[info exists ::tcl_platform(platform)] && \
             $::tcl_platform(platform) eq "windows"}]
       }
@@ -41,6 +115,45 @@ namespace eval :: {
   }
 
   proc checkEagleBeta28 { {patchLevel 1.0.5000.25377} } {
+    # <help>
+    # This procedure applies the compatibility workarounds required by
+    # Eagle releases at or below the beta 28 patch level.  It exists so
+    # that scripts written against newer Eagle features (or the newer
+    # Eagle core test suite) can still run, in a degraded but functional
+    # form, on older interpreters.  This is invoked early during startup
+    # in environments where the running Eagle version cannot be upgraded
+    # in lock-step with the script library.
+    #
+    # How it works: it first decides whether the workarounds apply by
+    # confirming this is Eagle and that the running patch level is less
+    # than or equal to the supplied beta 28 baseline.  When they apply it
+    # does two things.  First, it sets two no(...) array elements that
+    # tell the Eagle core test suite to skip operations that require
+    # commands introduced in beta 29, namely the version-range form of
+    # the tcl command and the file-name form of the hash command.
+    # Second, it wraps the interp command so that the readylimit
+    # sub-command is silently supported: the existing interp command is
+    # renamed to _interp, and a replacement is defined that intercepts
+    # readylimit (returning zero, matching the legacy behavior of
+    # always-fully-checked readiness) and delegates every other call to
+    # the renamed original via uplevel 1.
+    #
+    # Tricky details: the rename-and-wrap is performed only once, guarded
+    # by a check that no command named _interp already exists, so the
+    # procedure is safe to call more than once.  The first array set is
+    # marked in code comments as compensating for the missing version-
+    # range tcl sub-command, and the second for the missing file-name
+    # hash sub-command.
+    #
+    # Arguments:
+    #   patchLevel -- Optional baseline patch level identifying the beta 28
+    #                 release.  When the running interpreter is at or below
+    #                 this version, the workarounds are installed.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     #
     # NOTE: Is the running patch level of Eagle less than or equal to the
     #       beta 28 release patch level?
@@ -65,6 +178,30 @@ namespace eval :: {
         rename interp _interp
 
         proc interp { args } {
+          # <help>
+          # This procedure replaces the built-in interp command on older
+          # Eagle interpreters so that the readylimit sub-command appears
+          # to exist and returns a benign value.  It is installed by the
+          # enclosing beta 28 shim only after the original interp command
+          # has been renamed to _interp.
+          #
+          # How it works: it inspects its first argument.  When that is
+          # the string "readylimit", it returns 0 immediately, matching
+          # the legacy semantics in which interpreter readiness was always
+          # fully checked on every call (so there is effectively no
+          # adjustable limit).  Every other sub-command is forwarded to
+          # the renamed original via uplevel 1 so the call frame visible
+          # to interp behaves the same as before.
+          #
+          # Arguments:
+          #   args -- The interp sub-command and its arguments, in the same
+          #           form accepted by the built-in interp command.
+          #
+          # Results:
+          #   Zero for the readylimit sub-command; otherwise whatever the
+          #   underlying renamed interp command returns.
+          # </help>
+
           if {[llength $args] >= 1 && \
               [lindex $args 0] eq "readylimit"} then {
             #
@@ -81,6 +218,39 @@ namespace eval :: {
   }
 
   proc checkEagleBeta36 { {patchLevel 1.0.5982.00000} } {
+    # <help>
+    # This procedure turns on interactive command recording in Eagle
+    # builds that are newer than the beta 36 baseline.  It exists because
+    # interactive recording (the special bracket-record-one feature) only
+    # exists in those newer builds, and the user wants it enabled by
+    # default during shell startup without paying the cost of a hard
+    # error on older interpreters.
+    #
+    # How it works: it first checks that the user has not opted out via
+    # the no(NoAutoRecord) array or the NoAutoRecord environment
+    # variable.  Then it confirms this is Eagle and that the running
+    # patch level is strictly newer than the supplied baseline (the
+    # baseline check returns true at or below the version, so the result
+    # is negated).  Finally, a second gate allows a user override: if the
+    # no(ForceAutoRecord) opt-out is absent or the ForceAutoRecord
+    # environment variable is present, the special bracket-record-one
+    # command is invoked to begin recording.
+    #
+    # Tricky details: the leading hash on the recording command is
+    # escaped so the Tcl parser does not consume the rest of the line as
+    # a comment.  The two gating conditions use a deliberately mixed
+    # combination of array-and-environment-variable checks so that
+    # either approach can be used to enable or disable the behavior.
+    #
+    # Arguments:
+    #   patchLevel -- Optional baseline patch level identifying the beta 36
+    #                 release.  Recording is only enabled when the running
+    #                 interpreter is strictly newer than this version.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     if {![info exists ::no(NoAutoRecord)] && \
         ![info exists ::env(NoAutoRecord)] && \
         [checkIsEagle] && ![checkEaglePatchLevel $patchLevel]} then {
@@ -95,9 +265,53 @@ namespace eval :: {
   }
 
   proc checkEagleBeta41 {} {
+    # <help>
+    # This procedure installs a fallback definition of the global
+    # [isNonNullObjectHandle] procedure when the running Eagle interpreter
+    # does not already provide one.  It exists as a pre-beta-41
+    # compatibility shim so that downstream code can test for "a real
+    # managed object handle, not the null handle" with a single call
+    # regardless of which Eagle version is in use.
+    #
+    # How it works: it confirms this is Eagle (the predicate is only
+    # meaningful where managed object handles exist) and then looks for
+    # an existing command of that name.  When the command is missing, a
+    # fallback proc is defined in the global namespace that returns true
+    # only when the value is an object handle and is not equal to the
+    # special global null handle.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the inner proc command when the shim is installed,
+    #   or the empty string when nothing is done.
+    # </help>
+
     if {[checkIsEagle] && \
         [lsearch -exact [info commands] isNonNullObjectHandle] == -1} then {
       proc isNonNullObjectHandle { value } {
+        # <help>
+        # This procedure reports whether the supplied value is a managed
+        # object handle that does not refer to the null reference.  It
+        # is the fallback installed by the surrounding beta 41 shim and
+        # only runs when the built-in version is missing.
+        #
+        # How it works: it combines two checks, [isObjectHandle] (which is
+        # true for any well-formed handle string) and inequality against
+        # the global null variable (which holds the string used to
+        # represent the null reference).  Both must hold for the result
+        # to be true.
+        #
+        # Arguments:
+        #   value -- The candidate value, expected to be either an Eagle
+        #            object handle string or any other arbitrary value.
+        #
+        # Results:
+        #   True when the value is a non-null object handle; false
+        #   otherwise.
+        # </help>
+
         global null
         return [expr {[isObjectHandle $value] && $value ne $null}]
       }
@@ -105,23 +319,137 @@ namespace eval :: {
   }
 
   proc checkEagleBeta42 {} {
+    # <help>
+    # This procedure installs two fallback definitions in the global
+    # namespace when the running Eagle interpreter is older than the
+    # beta 42 release.  It exists as a pre-beta-42 compatibility shim so
+    # that downstream code can rely on [isDotNetCore] and
+    # [doesCompileCSharpWork] being callable on every supported Eagle
+    # build.
+    #
+    # How it works: it confirms this is Eagle and then probes for the
+    # presence of [isDotNetCore].  When that command is missing, the
+    # missing command is taken as evidence that the [doesCompileCSharpWork]
+    # helper is also missing, and both are defined together.  The
+    # [isDotNetCore] fallback consults the eagle_platform(runtime) array
+    # element and returns true when its case-insensitive value is ".net
+    # core".  The [doesCompileCSharpWork] fallback unconditionally returns
+    # true, which matches the legacy assumption that compiled-on-the-fly
+    # C# always worked in older builds (callers that need a more
+    # accurate answer must upgrade).
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the last installed proc command, or the empty
+    #   string when nothing is done.
+    # </help>
+
     if {[checkIsEagle] && \
         [lsearch -exact [info commands] isDotNetCore] == -1} then {
       proc isDotNetCore {} {
+        # <help>
+        # This procedure reports whether the currently running Eagle is
+        # hosted on .NET Core.  It is installed by the surrounding beta
+        # 42 shim as a fallback for older Eagle builds that lacked this
+        # convenience predicate.
+        #
+        # How it works: it reads the eagle_platform(runtime) array
+        # element (set by Eagle at startup to identify the host CLR) and
+        # compares it case-insensitively to the literal ".net core",
+        # returning true on exact match.
+        #
+        # Arguments:
+        #   None.
+        #
+        # Results:
+        #   True when the hosting runtime identifies itself as .NET Core;
+        #   false otherwise (including the case where the runtime element
+        #   is missing).
+        # </help>
+
         return [expr {[info exists ::eagle_platform(runtime)] && [string \
             compare -nocase ".net core" $::eagle_platform(runtime)] == 0}]
       }
 
       proc doesCompileCSharpWork { {name ""} } {
+        # <help>
+        # This procedure reports whether the runtime C# compilation
+        # facility is expected to work.  It is the fallback installed
+        # by the surrounding beta 42 shim and, unlike the real beta 42
+        # implementation, always answers yes.
+        #
+        # How it works: it ignores its optional name argument and
+        # returns the literal true.  This preserves the legacy
+        # assumption from before beta 42 that the C# compiler integration
+        # is always available; callers that need a discriminating answer
+        # must rely on the real, post-beta-42 implementation.
+        #
+        # Arguments:
+        #   name -- Optional identifier of the specific test or feature
+        #           the caller cares about.  Ignored by this fallback;
+        #           accepted only for interface compatibility.
+        #
+        # Results:
+        #   True, unconditionally.
+        # </help>
+
         return true
       }
     }
   }
 
   proc checkEagleBeta46 {} {
+    # <help>
+    # This procedure installs a fallback definition of the global
+    # [getShellExecutableName] procedure when the running Eagle interpreter
+    # does not already provide one.  It exists as a pre-beta-46
+    # compatibility shim so that downstream code can ask "what is the
+    # name of the program running this script" without worrying about
+    # Mono and .NET Core quirks that make info nameofexecutable
+    # misleading on those runtimes.
+    #
+    # How it works: it confirms this is Eagle and that the command is
+    # missing, then defines the fallback in the global namespace.  The
+    # fallback distinguishes hosts where info nameofexecutable would
+    # report the hosting CLR launcher rather than the actual shell (Mono
+    # and .NET Core), and on those hosts returns the second element of
+    # info assembly true (the entry assembly file name) instead.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the inner proc command when the shim is installed,
+    #   or the empty string when nothing is done.
+    # </help>
+
     if {[checkIsEagle] && \
         [lsearch -exact [info commands] getShellExecutableName] == -1} then {
       proc getShellExecutableName {} {
+        # <help>
+        # This procedure returns the file name of the shell executable
+        # currently running.  It is the fallback installed by the
+        # surrounding beta 46 shim and is intended to give a usable
+        # answer on every supported runtime.
+        #
+        # How it works: when the interpreter is Eagle and is hosted on
+        # Mono or .NET Core, info nameofexecutable points at the CLR
+        # launcher rather than the Eagle shell, so the procedure asks
+        # info assembly true for the entry assembly and returns its file
+        # name (the second list element).  On other runtimes it falls
+        # back to info nameofexecutable directly.  The Tcl branch (when
+        # this somehow gets evaluated in Tcl) also uses info
+        # nameofexecutable.
+        #
+        # Arguments:
+        #   None.
+        #
+        # Results:
+        #   A file name string for the running shell executable.
+        # </help>
+
         if {[isEagle]} then {
           if {[isMono] || [isDotNetCore]} then {
             return [lindex [info assembly true] 1]
@@ -136,26 +464,149 @@ namespace eval :: {
   }
 
   proc checkEagleBeta47 {} {
+    # <help>
+    # This procedure installs a fallback definition of the global
+    # [vwaitLocked] procedure when the running Eagle interpreter does not
+    # already provide one.  It exists as a pre-beta-47 compatibility
+    # shim so that downstream code that wants to wait on a variable
+    # while holding the script-engine lock does not need to special-case
+    # older interpreters.
+    #
+    # How it works: it confirms this is Eagle and that the command is
+    # missing, then defines a degenerate fallback in the global
+    # namespace.  The fallback does not actually attempt any locking;
+    # it simply evaluates the supplied script once in the caller's
+    # frame.  This is acceptable because, on older builds where the
+    # locking primitive did not exist, the related blocking semantics
+    # were also absent, and a single evaluation matches what the legacy
+    # callers used to do.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the inner proc command when the shim is installed,
+    #   or the empty string when nothing is done.
+    # </help>
+
     if {[checkIsEagle] && \
         [lsearch -exact [info commands] vwaitLocked] == -1} then {
       proc vwaitLocked { varName isArray script } {
+        # <help>
+        # This procedure is the no-locking fallback for [vwaitLocked]
+        # installed by the surrounding beta 47 shim.  Newer Eagle builds
+        # provide a real implementation that holds the script-engine
+        # lock for the duration of the wait; this stand-in simply runs
+        # the script once.
+        #
+        # How it works: it ignores both the variable name and the
+        # is-array flag (since there is nothing to wait on without the
+        # underlying locking primitive) and evaluates the script in the
+        # caller's frame via uplevel 1.
+        #
+        # Arguments:
+        #   varName -- Name of the variable that would have been watched;
+        #              ignored by this fallback.
+        #   isArray -- Boolean flag indicating whether varName names an
+        #              array element; ignored by this fallback.
+        #   script  -- A Tcl script to evaluate exactly once in the
+        #              caller's frame.
+        #
+        # Results:
+        #   Whatever the supplied script returns.
+        # </help>
+
         uplevel 1 $script
       }
     }
   }
 
   proc checkEagleBeta49 {} {
+    # <help>
+    # This procedure installs a no-op fallback for the test library
+    # helper [checkForUnicodeCategory] when the running Eagle interpreter
+    # does not already provide one.  It exists as a pre-beta-49
+    # compatibility shim so that test scripts that ask the running
+    # interpreter to verify a character's Unicode category can be
+    # loaded without errors on older builds.
+    #
+    # How it works: it confirms this is Eagle and that no proc named
+    # [checkForUnicodeCategory] is defined, then defines an empty body in
+    # the global namespace.  The empty body silently accepts the
+    # arguments and returns nothing, so any test that is just doing a
+    # category sanity check will pass through trivially.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the inner proc command when the shim is installed,
+    #   or the empty string when nothing is done.
+    # </help>
+
     #
     # NOTE: This is a pre-beta 49 compatibility shim for the
     #       [checkForUnicodeCategory] test library procedure.
     #
     if {[checkIsEagle] && \
         [llength [info procs checkForUnicodeCategory]] == 0} then {
-      proc checkForUnicodeCategory { channel character wantCode } {}
+      proc checkForUnicodeCategory { channel character wantCode } {
+        # <help>
+        # This procedure is the no-op fallback for [checkForUnicodeCategory]
+        # installed by the surrounding beta 49 shim.  It accepts the same
+        # arguments as the real implementation but performs no check and
+        # returns nothing, so tests that rely on Unicode category
+        # introspection silently pass on older Eagle builds.
+        #
+        # Arguments:
+        #   channel   -- The test output channel; ignored.
+        #   character -- The character whose category would have been
+        #                tested; ignored.
+        #   wantCode  -- The expected Unicode category code; ignored.
+        #
+        # Results:
+        #   The empty string.
+        # </help>
+      }
     }
   }
 
   proc checkEagleBeta51 { {timeout 20000} {patchLevel 1.0.8251.52012} } {
+    # <help>
+    # This procedure raises the default network timeout for Eagle builds
+    # that are newer than the beta 51 baseline.  It exists because the
+    # default network timeout in those builds is too short for some
+    # legitimate uses, and the user wants a longer one applied during
+    # shell startup without breaking on older interpreters that lack the
+    # adjustable timeout.
+    #
+    # How it works: it confirms this is Eagle and that the running patch
+    # level is strictly newer than the supplied baseline (the helper
+    # returns true at or below the version, so the result is negated).
+    # It then calls the internal SetOrUnsetTimeout method on the active
+    # interpreter to apply the new value to the Network timeout slot,
+    # discarding any returned error code into a local variable.  As a
+    # final cosmetic touch, the global test_timeout variable is updated
+    # so that visible test reporting reflects the same timeout value.
+    #
+    # Tricky details: a commented-out call to GetTimeout above the set
+    # call documents how to read the current timeout if needed.  The
+    # final assignment to test_timeout is described in code as a hack
+    # lifted from the testPrologue.eagle file; it is purely a courtesy
+    # for the user and has no functional effect on real network calls.
+    #
+    # Arguments:
+    #   timeout    -- Optional new network timeout in milliseconds.
+    #                 Defaults to twenty seconds.
+    #   patchLevel -- Optional baseline patch level identifying the beta 51
+    #                 release.  The change is only applied when the
+    #                 running interpreter is strictly newer than this
+    #                 version.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     if {[checkIsEagle] && ![checkEaglePatchLevel $patchLevel]} then {
       set error null
 
@@ -172,13 +623,50 @@ namespace eval :: {
   }
 
   proc checkEagleBeta53 {} {
+    # <help>
+    # This procedure installs fallback definitions for three test
+    # library helpers when the running Eagle interpreter is older than
+    # the beta 53 release.  It exists as a pre-beta-53 compatibility
+    # shim so that test scripts that call into these helpers can be
+    # loaded without errors on older builds.
+    #
+    # How it works: it confirms this is Eagle, then guards each of the
+    # three definitions with a check that no proc of the same name
+    # already exists.  The first two helpers (checkForOfflineMode and
+    # [reportTestDuplicateNames]) are installed as empty bodies that
+    # silently accept the channel argument.  The third
+    # (reportTestResultCounts) is given a working stand-in that
+    # optionally writes the percentage of passing tests into a caller
+    # variable using upvar, by deferring to the long-standing
+    # [getPassedPercentage] helper.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     if {[checkIsEagle]} then {
       #
       # NOTE: This is a pre-beta 53 compatibility shim for the
       #       [checkForOfflineMode] test library procedure.
       #
       if {[llength [info procs checkForOfflineMode]] == 0} then {
-        proc checkForOfflineMode { channel } {}
+        proc checkForOfflineMode { channel } {
+          # <help>
+          # This procedure is the no-op fallback for [checkForOfflineMode]
+          # installed by the surrounding beta 53 shim.  Newer builds use
+          # it to short-circuit tests that need network access when the
+          # interpreter is in offline mode; the fallback always passes.
+          #
+          # Arguments:
+          #   channel -- The test output channel; ignored.
+          #
+          # Results:
+          #   The empty string.
+          # </help>
+        }
       }
 
       #
@@ -186,7 +674,20 @@ namespace eval :: {
       #       [reportTestDuplicateNames] test library procedure.
       #
       if {[llength [info procs reportTestDuplicateNames]] == 0} then {
-        proc reportTestDuplicateNames { channel } {}
+        proc reportTestDuplicateNames { channel } {
+          # <help>
+          # This procedure is the no-op fallback for
+          # [reportTestDuplicateNames] installed by the surrounding beta 53
+          # shim.  Newer builds use it to print a warning when tests
+          # share a name; the fallback simply reports nothing.
+          #
+          # Arguments:
+          #   channel -- The test output channel; ignored.
+          #
+          # Results:
+          #   The empty string.
+          # </help>
+        }
       }
 
       #
@@ -195,6 +696,31 @@ namespace eval :: {
       #
       if {[llength [info procs reportTestResultCounts]] == 0} then {
         proc reportTestResultCounts { channel {varName ""} } {
+          # <help>
+          # This procedure is the fallback for [reportTestResultCounts]
+          # installed by the surrounding beta 53 shim.  It does not
+          # print the per-status counts that the real implementation
+          # would; instead it just makes the passing percentage
+          # available to the caller through an optional output variable.
+          #
+          # How it works: when the caller supplies a non-empty variable
+          # name, that variable is linked into this frame with upvar 1
+          # and assigned the value returned by [getPassedPercentage].
+          # Without a variable name the percentage is computed but
+          # discarded.
+          #
+          # Arguments:
+          #   channel -- The test output channel; ignored.
+          #   varName -- Optional name of a caller variable to receive
+          #              the passing percentage.  Empty means do not
+          #              report.
+          #
+          # Results:
+          #   The passing percentage value (the result of the final
+          #   assignment) when the variable is requested; otherwise the
+          #   computed percentage value as well.
+          # </help>
+
           if {[string length $varName] > 0} then {
             upvar 1 $varName percent
           }
@@ -206,6 +732,29 @@ namespace eval :: {
   }
 
   proc checkEagleBeta55 {} {
+    # <help>
+    # This procedure turns on the Count interactive-prompt flag when the
+    # running Eagle interpreter exposes it.  It exists so that the
+    # interactive shell prompt shows a sequential command count, which
+    # is useful when reviewing transcripts, without breaking on older
+    # builds whose PromptFlags enum does not include that value.
+    #
+    # How it works: it first checks that the user has not opted out via
+    # the no(NoPromptCommandCount) array or the matching environment
+    # variable, and that this is really Eagle.  It then enumerates the
+    # PromptFlags enum names via reflection.  If the literal "Count" is
+    # present, it sets that flag on the active interpreter's
+    # promptFlags property using the NonPublic field access form with
+    # the AutoFlagsEnum object flag so the bit is OR-ed in rather than
+    # replacing the existing flags.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     if {![info exists ::no(NoPromptCommandCount)] && \
         ![info exists ::env(NoPromptCommandCount)] && \
         [checkIsEagle]} then {
@@ -219,6 +768,47 @@ namespace eval :: {
   }
 
   proc checkEagleBeta56 {} {
+    # <help>
+    # This procedure applies several interactive-shell and test-library
+    # adjustments that the beta 56 release made available.  It exists to
+    # consolidate the user's preferred startup tweaks in one place,
+    # while gracefully skipping anything the running interpreter does
+    # not support.  The adjustments fall into three groups: prompt
+    # flags, a pre-beta-56 test helper shim, and (when the Eagle.Test
+    # package is available) optional reconfiguration of the prompt
+    # script and the shell unknown handler.
+    #
+    # How it works: after confirming this is Eagle, it enumerates the
+    # PromptFlags enum names.  When the user has not opted out, it
+    # turns on the CommandCount and ActiveLoops bits (each guarded by
+    # an in-list check so a missing bit is silently skipped) via the
+    # NonPublic, AutoFlagsEnum object-invocation form so the bits are
+    # OR-ed onto the existing prompt flags.  Next, if no
+    # [checkForTip237] proc exists, an empty fallback is installed for
+    # the test library.  Finally, if Eagle.Test is provideable, it is
+    # required and, when permitted by no(NoTclPrompt1) / NoTclPrompt1
+    # opt-outs, the prompt script is reset via
+    # [eagle_setupPromptScript] true (with the NoTclPrompt1Date
+    # environment variable forced on as a noise-reduction hack).
+    # Similarly, when permitted by no(NoShellUnknown) / NoShellUnknown
+    # opt-outs, [eagle_enableShellUnknown] true is invoked to install the
+    # shell unknown handler; the large block of commented
+    # [addRuntimeOption] lines documents the available knobs without
+    # actually setting any of them.
+    #
+    # Tricky details: each opt-out is honored via either an entry in
+    # the no(...) array or the same-named environment variable, which
+    # is the convention used elsewhere in this script collection.  All
+    # PromptFlags adjustments are reflection-based because the prompt
+    # flags property is not part of the public API.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     if {[checkIsEagle]} then {
       set flags [object invoke Enum GetNames PromptFlags]
 
@@ -239,7 +829,21 @@ namespace eval :: {
       }
 
       if {[llength [info procs checkForTip237]] == 0} then {
-        proc checkForTip237 { channel } {}
+        proc checkForTip237 { channel } {
+          # <help>
+          # This procedure is the no-op fallback for [checkForTip237]
+          # installed by the surrounding beta 56 shim.  Newer builds use
+          # it to verify support for the TIP 237 arbitrary-precision
+          # integer behavior in tests; the fallback silently accepts
+          # the channel and returns nothing.
+          #
+          # Arguments:
+          #   channel -- The test output channel; ignored.
+          #
+          # Results:
+          #   The empty string.
+          # </help>
+        }
       }
 
       if {[string length [package ifneeded Eagle.Test 1.0]] > 0 && \

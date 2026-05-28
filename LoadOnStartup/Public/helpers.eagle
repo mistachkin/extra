@@ -20,10 +20,70 @@
 #
 namespace eval :: {
   proc checkIsEagle {} {
+    # <help>
+    # This procedure reports whether the current interpreter is Eagle.  It
+    # is provided as a defensive wrapper around the built-in [isEagle]
+    # command because [isEagle] does not exist in stock Tcl interpreters,
+    # where invoking it would raise an error; this wrapper turns that
+    # difference into a clean true/false answer so that the surrounding
+    # startup code can branch on engine identity without first arranging
+    # its own catch logic.
+    #
+    # How it works: the [isEagle] command is invoked inside a [catch] so
+    # that a missing-command error in non-Eagle interpreters is caught
+    # cleanly.  The expression then returns true only when the catch
+    # itself returned a zero status (meaning the command existed and ran)
+    # and the value it produced was itself true.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   True when the current interpreter is Eagle and [isEagle] reported
+    #   true, false in every other case (including non-Eagle interpreters
+    #   where the command does not exist).
+    # </help>
+
     return [expr {[catch {isEagle} result] == 0 && $result}]
   }
 
   proc checkEaglePatchLevel { patchLevel } {
+    # <help>
+    # This procedure tests whether the running Eagle interpreter's patch
+    # level is less than or equal to the patch level supplied by the
+    # caller.  It exists to gate startup logic that must only apply to
+    # older Eagle builds -- for example, applying a workaround that has
+    # since been fixed in a newer release.  When the running interpreter
+    # is not Eagle (or is an Eagle build that exposes no patch level), the
+    # check returns false so that no version-conditional behavior is
+    # accidentally enabled.
+    #
+    # How it works: the procedure first looks for the patchLevel entry of
+    # the global eagle_platform array; if it is absent, false is returned
+    # immediately.  Otherwise, the running interpreter's patch level is
+    # compared to the caller-supplied threshold using [package vcompare],
+    # which understands dotted version numbers.  A strictly greater result
+    # means the running build is newer than the threshold and false is
+    # returned; otherwise true is returned.
+    #
+    # Tricky details: the semantics are "running build is no newer than
+    # the threshold", so a caller passing a very old threshold will get a
+    # false answer on most modern interpreters.  Callers must remember to
+    # supply the threshold from the perspective of the WORKAROUND being
+    # gated, not from the perspective of the FIX they wish was present.
+    #
+    # Arguments:
+    #   patchLevel -- The threshold version string.  Compared against the
+    #                 running interpreter's patch level with
+    #                 [package vcompare] semantics; need not be in any
+    #                 particular zero-padded form.
+    #
+    # Results:
+    #   True when the running interpreter's patch level is less than or
+    #   equal to the threshold, false when it is strictly greater, and
+    #   false when the patch level is unavailable.
+    # </help>
+
     if {![info exists ::eagle_platform(patchLevel)]} then {
       #
       # NOTE: Either not Eagle -OR- there is purposely no patch level.
@@ -46,6 +106,47 @@ namespace eval :: {
   }
 
   proc runBadgeTestScript { iis local } {
+    # <help>
+    # This procedure launches the Badge test script that lives under the
+    # XDG startup tree, after first ensuring that the global argv list
+    # carries the flags the test script expects.  It exists as a one-call
+    # entry point for kicking off the Badge tests interactively or from
+    # other automation, without having to remember the exact flag set or
+    # the script's filesystem location.
+    #
+    # How it works: it first verifies that the XDG_STARTUP_HOME
+    # environment variable is set, raising an error otherwise so the
+    # failure is reported up front rather than as a more confusing
+    # downstream file-not-found.  It then mutates the global argv to
+    # include the runAllBadgeTests flag with a true value, appending only
+    # if the flag is not already present.  The iis and local boolean
+    # values supplied by the caller are likewise appended to argv (each
+    # only if not already present), so existing user-provided values on
+    # argv win over the values passed to this procedure.  Finally, the
+    # badge test script is sourced via [uplevel 1] from the standard
+    # Scripts/Public location relative to XDG_STARTUP_HOME so that the
+    # script runs in the caller's frame.
+    #
+    # Tricky details: because the procedure mutates the caller's global
+    # argv rather than scoping a private copy, repeated calls accumulate
+    # state -- the appended flags persist across runs unless something
+    # else cleans argv.  The "already present" check is exact-match by
+    # flag name only, so a value mismatch (for example argv already
+    # contains -iis false but the caller passes true) will silently leave
+    # the prior value in effect.
+    #
+    # Arguments:
+    #   iis   -- Boolean-like value to associate with the -iis flag on
+    #            argv when the flag is not already present.
+    #   local -- Boolean-like value to associate with the -localhost flag
+    #            on argv when the flag is not already present.
+    #
+    # Results:
+    #   Whatever the sourced badge test script returns; callers should not
+    #   rely on any specific value.  Raises an error when
+    #   XDG_STARTUP_HOME is not set.
+    # </help>
+
     if {![info exists ::env(XDG_STARTUP_HOME)]} then {
       error "the XDG_STARTUP_HOME environment variable is not set"
     }
@@ -73,6 +174,51 @@ namespace eval :: {
   }
 
   proc runHarpyTestScript { quick iis local } {
+    # <help>
+    # This procedure launches the Harpy commercial-plugin test suite
+    # under the Eagle Plugins tree, optionally running in a "quick" mode
+    # that skips the time-intensive flag tests.  It exists as a one-call
+    # entry point analogous to [runBadgeTestScript] but tailored to the
+    # Harpy tests, encapsulating the bookkeeping needed to toggle the
+    # time-intensive constraint cleanly across runs.
+    #
+    # How it works: it first verifies that the EAGLE environment variable
+    # is set, raising an error otherwise.  The iis and local boolean
+    # values are appended unconditionally to the global argv as -iis and
+    # -localhost flags.  The current state of the global "no" array is
+    # snapshotted into a local savedNo array so it can be restored later.
+    # When "quick" is true, the "timeIntensive" entry of the global "no"
+    # array is set to 1, which causes the test harness to skip
+    # time-intensive tests (a HACK comment in the body notes this is to
+    # skip the flag tests specifically); when "quick" is false, that
+    # entry is removed.  The Harpy all.eagle test driver is then sourced
+    # via [uplevel 1] under the standard Plugins/Commercial/Enterprise
+    # path, inside a try block whose finally clause unconditionally
+    # removes timeIntensive and re-applies the snapshotted "no" array so
+    # the interpreter's state is left as it was found.
+    #
+    # Tricky details: unlike [runBadgeTestScript], the iis and local
+    # flags are appended without first checking whether they are already
+    # present, so repeated invocations will pile duplicate flag/value
+    # pairs onto argv.  The savedNo snapshot only captures and restores
+    # the "no" array; other global state mutated by the sourced tests is
+    # not restored.
+    #
+    # Arguments:
+    #   quick -- Boolean-like flag.  When true, the time-intensive tests
+    #            are skipped; when false, the timeIntensive override is
+    #            cleared so the full set runs.
+    #   iis   -- Boolean-like value appended to argv as the value of the
+    #            -iis flag.
+    #   local -- Boolean-like value appended to argv as the value of the
+    #            -localhost flag.
+    #
+    # Results:
+    #   Whatever the sourced Harpy test driver returns; callers should
+    #   not rely on any specific value.  Raises an error when the EAGLE
+    #   environment variable is not set.
+    # </help>
+
     if {![info exists ::env(EAGLE)]} then {
       error "the EAGLE environment variable is not set"
     }
@@ -100,6 +246,41 @@ namespace eval :: {
   }
 
   proc maybeCreateBackupPath { path } {
+    # <help>
+    # This procedure derives a "backup" file path from an existing path by
+    # inserting a Unix-timestamp segment between the file's root name and
+    # its extension.  It exists to make it easy to produce per-call backup
+    # filenames that sort lexicographically by creation time and that do
+    # not collide on rapid successive backups (assuming the calls are at
+    # least one second apart).  The path is returned unchanged when there
+    # is nothing meaningful to time-stamp.
+    #
+    # How it works: the procedure first short-circuits and returns the
+    # input unchanged when the path is empty, when it has no tail
+    # component (for example a bare directory), or when its file rootname
+    # is empty (for example a name that consists only of an extension).
+    # Otherwise, the directory, root, and extension of the path are
+    # extracted, and a new path is assembled by joining the directory
+    # back together with a tail formed of the root, a dot, the current
+    # seconds value from [clock seconds], and the original extension.
+    #
+    # Tricky details: the timestamp is the integer seconds since the Unix
+    # epoch, so two backups taken within the same second will produce
+    # identical paths and the second will overwrite the first if a file
+    # is actually created at that path; this procedure only assembles the
+    # name, it does not create or test the file on disk.
+    #
+    # Arguments:
+    #   path -- A file path that may have a directory part, a name, and
+    #           an extension.  When empty or lacking a usable name part,
+    #           it is returned unchanged.
+    #
+    # Results:
+    #   A new path with the current epoch seconds inserted between the
+    #   root name and the extension, or the unchanged input when no
+    #   timestamped name could be derived.
+    # </help>
+
     if {[string length $path] == 0} then {
       return $path
     }
@@ -125,6 +306,45 @@ namespace eval :: {
   }
 
   proc forceUseLatestTestPackage { directory } {
+    # <help>
+    # This procedure forces the Eagle.Test package to be served from the
+    # test.eagle file located beneath a developer checkout directory,
+    # rather than from whichever copy the auto-loader would otherwise
+    # choose.  It is useful when iterating on changes to the test library
+    # itself, because it both re-registers the "package ifneeded" recipe
+    # AND, when the package has already been loaded, forces an in-place
+    # reload so the new code becomes effective immediately.
+    #
+    # How it works: a fully normalized path is built from the supplied
+    # directory by appending lib/Eagle1.0/test.eagle.  If that file does
+    # not exist, the string "Skipped" is returned without any side
+    # effects.  Otherwise, [package ifneeded] is registered at the global
+    # scope to source the file through [sourceWithInfo] when version 1.0
+    # of Eagle.Test is requested next.  The procedure then probes whether
+    # Eagle.Test is already loaded; if it is, the file is sourced
+    # immediately at the global scope and the string "Loaded" is returned
+    # to indicate that an active reload occurred.  If the package has not
+    # yet been loaded, "Setup" is returned to indicate that only the
+    # "package ifneeded" recipe was installed and the package will be
+    # picked up the next time it is required.
+    #
+    # Tricky details: the [catch] around [package present] is the only
+    # signal used to decide between "Loaded" and "Setup" -- a successful
+    # call (catch returns zero) means the package is already present.
+    # All package operations are explicitly evaluated at "uplevel #0" so
+    # the registration applies to the global package database regardless
+    # of the caller's namespace.
+    #
+    # Arguments:
+    #   directory -- A directory that contains a lib/Eagle1.0/test.eagle
+    #                file (typically an Eagle source checkout root).
+    #
+    # Results:
+    #   "Loaded" when the package was already present and was forcibly
+    #   re-sourced, "Setup" when only the recipe was registered, or
+    #   "Skipped" when the expected test.eagle file does not exist.
+    # </help>
+
     set fileName [file normalize [file join \
         $directory lib Eagle1.0 test.eagle]]
 
@@ -151,6 +371,41 @@ namespace eval :: {
   }
 
   proc maybeForceUseLatestTestPackage {} {
+    # <help>
+    # This procedure is a guarded driver for [forceUseLatestTestPackage]
+    # that selectively forces use of the development copy of the
+    # Eagle.Test package when the environment is set up for it.  It
+    # exists so that the startup script can request "use the latest test
+    # package if applicable" with a single call, instead of repeating
+    # the gating logic at every site.
+    #
+    # How it works: the procedure first checks the global "no" array for
+    # a useLatestTestPackage opt-out entry; if present, the procedure
+    # returns immediately and does nothing.  Otherwise it looks for the
+    # EAGLE environment variable; if absent, the procedure also does
+    # nothing.  When both gates pass, it computes a boolean indicating
+    # whether the current session is interactive (based on the
+    # tcl_interactive global) and then delegates to
+    # [forceUseLatestTestPackage] passing the EAGLE checkout root.  A
+    # status banner can optionally be displayed to the host via
+    # [host result], but its surrounding "if {$interactive && 0}" guard
+    # disables the banner by construction; the dead branch is preserved
+    # because it is easy to re-enable for debugging by changing the
+    # constant.
+    #
+    # Tricky details: the procedure deliberately swallows the return
+    # value of [forceUseLatestTestPackage]; only its side effects matter
+    # here.  The "no(useLatestTestPackage)" opt-out follows the standard
+    # Eagle convention where setting an entry in the "no" array disables
+    # the named behavior.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An unspecified value; callers should not rely on it.
+    # </help>
+
     if {![info exists ::no(useLatestTestPackage)]} then {
       if {[info exists ::env(EAGLE)]} then {
         set interactive [expr {
@@ -168,6 +423,43 @@ namespace eval :: {
   }
 
   proc hexConstify { list } {; # this is garbage... list of what?  verify?
+    # <help>
+    # This procedure formats a list of hexadecimal byte tokens into a
+    # C-style comma-separated array initializer, wrapping the output to
+    # eight values per line.  It is a quick helper for pasting binary
+    # blobs (such as small embedded payloads) into C, C++, or C# source
+    # files, where the conventional formatting is "0xNN, 0xNN, ..." with
+    # a manageable number of items per line.  A NOTE on the proc header
+    # candidly admits that the input element shape is not strictly
+    # documented and the helper deserves cleanup; callers should verify
+    # the input themselves.
+    #
+    # How it works: for each input element the procedure appends a
+    # leading space (after the first element of the current line), then
+    # the literal "0x" prefix, then the lowercased element text, then a
+    # trailing comma.  A running count increments per element; when it
+    # reaches eight, a carriage-return/newline pair is appended and the
+    # count is reset to zero, producing the eight-per-line wrap.  After
+    # the loop, any trailing commas are trimmed from the result before it
+    # is returned.
+    #
+    # Tricky details: no validation is performed on the element shape --
+    # callers should pass tokens that already look like two-digit hex
+    # values (without the 0x prefix), or any other text they want to see
+    # appear after "0x"; the only transformation applied is a lowercase
+    # conversion.  The trailing-comma trim removes ALL trailing commas
+    # (not just one), so a result whose last visible byte happens to look
+    # empty will still be cleaned up sensibly.
+    #
+    # Arguments:
+    #   list -- A list of hex token strings to format.  Each element is
+    #           emitted as "0x<lowercased element>," in the output.
+    #
+    # Results:
+    #   A multi-line string of the formatted hex bytes, wrapped to eight
+    #   per line, with the trailing commas stripped.
+    # </help>
+
     set count 0
     set result ""
 
@@ -196,6 +488,39 @@ namespace eval :: {
   #       basis.
   #
   proc addKapokLibToAutoPath {} {
+    # <help>
+    # This procedure conditionally appends the Kapok commercial plugin's
+    # library directory to Eagle's global auto_path so that packages
+    # shipped under Plugins/Commercial/Enterprise/Kapok/lib can be
+    # located by the package loader.  It exists as a small bit of
+    # per-project auto-path glue, historically used by the (now-retired)
+    # Eyrie project.  A TODO comment on the proc header questions whether
+    # this remains necessary, given that Eyrie has been replaced by the
+    # Package Repository Server family of tools, but the procedure
+    # serves as a useful reference for the "extend the auto-path on a
+    # per-project basis" pattern.
+    #
+    # How it works: if the EAGLE environment variable is set, the
+    # procedure normalizes a candidate Kapok library directory beneath
+    # that root and tests for its existence on disk.  When the directory
+    # is found, it is appended to the global auto_path list so that
+    # subsequent package requires can search it.  The temporary "dir"
+    # variable is then unset to avoid leaving stray state behind.  When
+    # the EAGLE environment variable is not set, the procedure is a
+    # silent no-op.
+    #
+    # Tricky details: a duplicate-detection check is NOT performed
+    # against auto_path, so repeated invocations will append the same
+    # directory multiple times.  The procedure operates in the global
+    # namespace and modifies the global auto_path directly.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An unspecified value; callers should not rely on it.
+    # </help>
+
     #
     # NOTE: Check if the Kapok library path (mainly for Eyrie) needs
     #       to be added to the Eagle auto-path.
@@ -213,6 +538,45 @@ namespace eval :: {
   }
 
   proc disableCountsInPrompt { channel {varName savedCountsInPrompt} } {
+    # <help>
+    # This procedure suppresses the per-prompt command and active-loop
+    # counters that the Eagle interactive shell normally renders as part
+    # of its prompt.  It exists so that long, scripted interactive
+    # sessions (and tests that scrape the prompt) can be cleaned up
+    # visually without losing the ability to restore the original
+    # behavior later via the matching [restoreCountsInPrompt] procedure.
+    #
+    # How it works: the procedure binds a caller-supplied save-state
+    # variable name via [upvar 1] so that the original prompt-flags value
+    # is captured in the caller's frame.  If the save variable does not
+    # yet exist, the active interpreter's non-public "promptFlags"
+    # member is read and stashed into the save variable, and then the
+    # same member is updated using the +AutoFlagsEnum object-flag and a
+    # subtractive flag-set expression that removes the CommandCount and
+    # ActiveLoops bits.  Both the read and the write are issued via
+    # [object invoke -flags +NonPublic], so the procedure reaches behind
+    # the public API.  A status line is reported to the caller-supplied
+    # channel via [tputs] on success, and a separate error line is
+    # reported when the reflection call throws.
+    #
+    # Tricky details: the procedure is idempotent in the sense that a
+    # second call with the same save variable name does nothing -- the
+    # presence of the save variable is treated as proof that the flags
+    # have already been disabled and the original value is already
+    # captured.  Because the save state lives in the caller's frame, the
+    # caller is responsible for keeping the variable alive between
+    # disable and restore.
+    #
+    # Arguments:
+    #   channel -- The channel passed to [tputs] for status reporting.
+    #   varName -- Optional.  The name of the variable in the caller's
+    #              frame used to save and later restore the original
+    #              prompt-flags value.  Defaults to "savedCountsInPrompt".
+    #
+    # Results:
+    #   An unspecified value; callers should not rely on it.
+    # </help>
+
     upvar 1 $varName savedCountsInPrompt
 
     if {![info exists savedCountsInPrompt]} then {
@@ -236,6 +600,42 @@ namespace eval :: {
   }
 
   proc restoreCountsInPrompt { channel {varName savedCountsInPrompt} } {
+    # <help>
+    # This procedure restores the active interpreter's prompt-flags value
+    # from a previously captured save-state variable, undoing a prior
+    # call to [disableCountsInPrompt].  It is the symmetric companion of
+    # the disable routine; together they let callers wrap a region of
+    # code (such as a long-running test or a multi-step interactive
+    # demonstration) in a clean-prompt envelope without permanently
+    # changing the shell.
+    #
+    # How it works: the procedure binds the caller-supplied save-state
+    # variable name via [upvar 1].  If the save variable exists, its
+    # value is written back to the active interpreter's non-public
+    # "promptFlags" member via [object invoke -flags +NonPublic], the
+    # save variable itself is then unset so a subsequent restore call is
+    # a no-op, and a status line is reported to the caller-supplied
+    # channel via [tputs].  If the reflection call throws, a separate
+    # error line is reported and the save variable is left in place.
+    # If the save variable does not exist, the procedure is a silent
+    # no-op.
+    #
+    # Tricky details: this restore relies on the save variable being in
+    # the caller's frame at the original name; passing a different
+    # varName from the one used at disable time will appear to do
+    # nothing (or will write a stale value if the variable happens to
+    # exist for other reasons).
+    #
+    # Arguments:
+    #   channel -- The channel passed to [tputs] for status reporting.
+    #   varName -- Optional.  The name of the variable in the caller's
+    #              frame that holds the saved prompt-flags value.
+    #              Defaults to "savedCountsInPrompt".
+    #
+    # Results:
+    #   An unspecified value; callers should not rely on it.
+    # </help>
+
     upvar 1 $varName savedCountsInPrompt
 
     if {[info exists savedCountsInPrompt]} then {

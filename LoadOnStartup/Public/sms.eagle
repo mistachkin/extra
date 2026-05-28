@@ -21,6 +21,53 @@
 #
 namespace eval ::Eagle {
   proc isValidShortMessage { message {type typical} } {
+    # <help>
+    # This procedure validates that the specified message is acceptable as
+    # the body of an SMS sent via the surrounding [sendViaShortMessageService]
+    # helper, both in terms of allowed characters and overall length.  It
+    # exists so that obviously bad payloads can be rejected before any
+    # external HTTP request is issued to the SMS provider, and so that the
+    # caller can choose between progressively richer character sets via a
+    # single "type" knob.
+    #
+    # How it works: it starts with a regular expression character class
+    # containing the space, the ASCII digits, and the upper and lower case
+    # ASCII letters, and then extends that class according to the requested
+    # type.  The "limited" type adds nothing further (alphanumerics and space
+    # only).  The "typical" type appends the hyphen and colon so that
+    # ISO-8601 date/time strings work without further escaping.  The "full"
+    # type appends the standard SMS punctuation set plus a curated handful
+    # of Latin-1 characters identified by their Unicode escape sequences
+    # (currency, diacritics, etc.).  Any other type value causes the
+    # procedure to return false immediately.  After the class is built, a
+    # length quantifier of one to one hundred sixty characters is appended
+    # and the assembled regular expression is applied to the message via
+    # [regexp --].
+    #
+    # Tricky details: the regular expression is built as a single character
+    # class with a trailing length quantifier, so it inherently enforces
+    # both the SMS length limit of 160 characters and a minimum length of
+    # one (empty messages are rejected).  The "full" set is best-effort --
+    # a TODO in the body notes that it has not been cross-checked against
+    # the official SMS specification.  Validation is performed entirely
+    # client-side; it does not, and cannot, guarantee that the provider
+    # will accept a message that passes here.
+    #
+    # Arguments:
+    #   message -- The candidate SMS body to validate.
+    #   type    -- Optional character-set selector; one of "limited" (space
+    #              plus ASCII alphanumerics), "typical" (the default; adds
+    #              hyphen and colon for date/time formatting), or "full"
+    #              (adds the standard SMS punctuation plus selected Latin-1
+    #              characters).  Any other value causes the procedure to
+    #              return false.
+    #
+    # Results:
+    #   One (true) when the message matches the chosen character set and is
+    #   between one and one hundred sixty characters long; zero (false)
+    #   otherwise, including for unknown type values.
+    # </help>
+
     set pattern {^[ 0-9A-Za-z}
 
     switch -exact -- $type {
@@ -54,6 +101,72 @@ namespace eval ::Eagle {
   }
 
   proc sendViaShortMessageService { accountSid authToken from to message } {
+    # <help>
+    # This procedure sends a short text message via the Twilio SMS REST API
+    # by shelling out to the external "curl" program.  It exists to provide
+    # a simple, dependency-free way to send SMS notifications from Eagle
+    # scripts -- using curl instead of a native HTTP client keeps the
+    # implementation portable and avoids pulling in additional packages,
+    # at the cost of requiring curl to be available on the host.
+    #
+    # How it works: it first validates every input.  The account SID must
+    # match the Twilio convention "AC" followed by exactly thirty-two
+    # hexadecimal digits.  The auth token must be exactly thirty-two
+    # hexadecimal digits.  Both the source and target phone numbers must be
+    # in North-American E.164 form (a literal plus sign, the digit one, and
+    # exactly ten further digits).  The message body must pass
+    # [isValidShortMessage] with its default character set.  Any failure
+    # raises a descriptive error and the procedure returns nothing useful.
+    #
+    # After validation, it constructs the request URL by joining the Twilio
+    # API base URL with the SID-specific Messages.json endpoint.  It then
+    # assembles a list-form [exec -success Success --] command, choosing the
+    # curl executable from the global $::curl variable when set (so a
+    # specific binary can be pinned) and otherwise relying on the system
+    # PATH to find a plain "curl".  The command is given the URL with -X
+    # POST, three --data-urlencode parameters (From, To, Body), and -u with
+    # accountSid:authToken for HTTP basic authentication.  The whole
+    # command is then evaluated with [eval] and its result returned.
+    #
+    # Tricky details and security notes: the auth token is a secret and is
+    # passed to curl on the command line via the -u option, which on many
+    # platforms makes it visible in process listings; callers should be
+    # aware that this is not a secret-safe transport.  The accountSid and
+    # authToken regular expressions intentionally permit either case in the
+    # hex digits.  Each piece appended to the command list is wrapped in
+    # literal double-quote characters via [appendArgs] because [exec] is
+    # invoked through the shell-style code path that treats each list
+    # element as a shell word; this also prevents accidental glob/word
+    # splitting of the URL.  Phone-number validation is intentionally
+    # restricted to plus-one numbers; international support would require
+    # relaxing the source and target regular expressions.  The base URL
+    # contains a hard-coded Twilio API version ("2010-04-01") that may
+    # eventually need to be updated, as called out by the in-body TODOs.
+    #
+    # Arguments:
+    #   accountSid -- The Twilio account string identifier.  Must match
+    #                 "AC" followed by exactly thirty-two hexadecimal
+    #                 digits.
+    #   authToken  -- The Twilio authorization token (a secret).  Must be
+    #                 exactly thirty-two hexadecimal digits.  This value
+    #                 will be visible to other users of the host while the
+    #                 curl process is running.
+    #   from       -- The source phone number in E.164 form with a +1
+    #                 country code (literal plus, the digit one, and
+    #                 exactly ten further digits).
+    #   to         -- The destination phone number in the same +1 E.164
+    #                 form as the source.
+    #   message    -- The SMS body to send.  Must pass isValidShortMessage
+    #                 with its default character set (i.e. one to one
+    #                 hundred sixty characters drawn from the "typical"
+    #                 character class).
+    #
+    # Results:
+    #   The standard output produced by curl on a successful POST (the
+    #   Twilio JSON response).  On any validation failure or curl exit
+    #   indicating something other than Success, an error is raised.
+    # </help>
+
     if {![regexp -- {^AC[0-9A-Fa-f]{32}$} $accountSid]} then {
       error "bad Twilio account string identifier"
     }

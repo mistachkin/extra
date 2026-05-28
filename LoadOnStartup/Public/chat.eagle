@@ -25,6 +25,58 @@ namespace eval ::Eagle {
   #       are loaded.  This procedure may raise script errors.
   #
   proc setupForChat { force } {
+    # <help>
+    # This procedure prepares the interpreter for the Fossil chat
+    # polling subsystem by establishing default state and ensuring that
+    # every supporting package is loaded.  It is the one-stop entry
+    # point that callers invoke before any other chat-related routine,
+    # so that subsequent calls can assume their prerequisites are met.
+    # It may raise a script error if any required package cannot be
+    # loaded.
+    #
+    # How it works: first, it makes the namespace variables serverHost
+    # (the optional subdomain prefix to prepend to the chat server's
+    # host name) and chatFilter (a list of string-match rules applied to
+    # the message originator) exist.  When the caller passes a true
+    # force flag (or the variable simply does not exist yet) the
+    # defaults are installed: serverHost is set to 1 and chatFilter is
+    # set to the empty list.  Next, System.Windows.Forms is loaded with
+    # object load so that the clipboard can be read; this may fail on
+    # runtimes such as Mono that lack WinForms support.  Then four
+    # packages are ensured: the package-client toolset is downloaded
+    # and loaded on demand (so the script can programmatically log into
+    # a Fossil repository), the HotKey.Enterprise plugin is required
+    # (with a flag set to suppress its complaint form), the
+    # Eagle.Secrets package is required (it provides the secret search
+    # routines used to fetch the login password), and the
+    # Eagle.Package.Downloader package is required.  When the
+    # downloader package is freshly loaded, its baseUri is set by
+    # rewriting the host of the engine auxiliary base URI through
+    # [addHostToUriForChatPoll], and its login and logout URN names are
+    # chosen by inspecting the DEBUG_URN environment variable (so
+    # developers can target the urn_login_test and urn_logout_test
+    # endpoints instead of the production urn_login and urn_logout
+    # endpoints).
+    #
+    # Tricky details: the assembly handle returned by object load is
+    # marked DISPOSAL in code comments to indicate that the caller does
+    # not need to retain it; the WinForms assembly stays loaded for the
+    # lifetime of the process via the CLR.  The HotKey complaint-form
+    # opt-out variable is annotated EXEMPT so that the lint pass for
+    # uppercase global state does not flag it.  The PackageDownloader
+    # namespace is created explicitly with namespace eval because
+    # setting its baseUri variable could otherwise race with the
+    # package's own initialization.
+    #
+    # Arguments:
+    #   force -- A boolean flag.  When true, the defaults for serverHost
+    #            and chatFilter are reapplied unconditionally; when
+    #            false, they are only set if currently unset.
+    #
+    # Results:
+    #   No meaningful value.
+    # </help>
+
     #
     # NOTE: Which specific server host, if any, is being used for chatting
     #       features?
@@ -112,6 +164,29 @@ namespace eval ::Eagle {
   #       Fossil response processing and SMS messages.
   #
   proc getDateTimeFormatForChat { {display false} } {
+    # <help>
+    # This procedure returns the canonical DateTime format string used
+    # throughout the chat polling subsystem.  It exists so that both
+    # parsing (of Fossil JSON mtime values) and presentation (of human-
+    # readable notification messages) draw from a single definition,
+    # eliminating any chance of mismatched formats.
+    #
+    # How it works: when the display flag is true it returns a friendly
+    # variant that includes an at-sign separator between the date and
+    # the time and a trailing Z to denote UTC.  When false (the default)
+    # it returns the strict ISO 8601 form with a T separator that is
+    # accepted by clock scan and matched by the Fossil JSON mtime
+    # regular expression elsewhere in the module.
+    #
+    # Arguments:
+    #   display -- Optional boolean.  Pass true to get the human-readable
+    #              variant; false (the default) returns the strict
+    #              parse-friendly variant.
+    #
+    # Results:
+    #   The chosen DateTime format string.
+    # </help>
+
     if {$display} then {
       return "yyyy-MM-dd @ HH:mm:ssZ"
     } else {
@@ -124,6 +199,43 @@ namespace eval ::Eagle {
   #       host with the target domain.
   #
   proc addHostToUriForChatPoll { baseUri } {
+    # <help>
+    # This procedure takes a base URI and, when the serverHost namespace
+    # variable is set to a non-empty value, returns a new URI whose
+    # host name has been prefixed with that value followed by a dot
+    # (for example, "1.example.com" instead of "example.com").  It
+    # exists so that the chat polling subsystem can target a specific
+    # subdomain of the configured Fossil server without rebuilding the
+    # base URI from scratch.
+    #
+    # How it works: it reads the serverHost variable.  When set and
+    # non-empty, it asks the managed Uri.TryCreate method to parse the
+    # base URI into an Absolute Uri object.  When TryCreate succeeds
+    # and the resulting object reference is non-null, it uses string
+    # map to replace the original host portion with the prefixed form
+    # everywhere it appears in the URI's string representation, and
+    # returns the result.  If the variable is unset, empty, or the URI
+    # cannot be parsed as absolute, the original base URI is returned
+    # unchanged.
+    #
+    # Tricky details: the TryCreate invocation uses object invoke
+    # -create -alias so the resulting Uri reference is wrapped as a
+    # command alias named uri, and the boolean result is fed back into
+    # the if condition via ToString.  Because string map operates on
+    # the entire URI string, any literal occurrence of the host name
+    # elsewhere in the URI (such as in a query or fragment) would also
+    # be rewritten; this is not normally a concern for the Fossil
+    # base URIs used here.
+    #
+    # Arguments:
+    #   baseUri -- The URI to potentially rewrite.  Must be parseable
+    #              as an absolute URI for any rewriting to occur.
+    #
+    # Results:
+    #   The rewritten URI when a serverHost prefix is configured and
+    #   the input is parseable; otherwise the unchanged baseUri.
+    # </help>
+
     variable serverHost
 
     if {[info exists serverHost] && [string length $serverHost] > 0 && \
@@ -143,6 +255,33 @@ namespace eval ::Eagle {
   #       the configured Fossil repository.
   #
   proc getUriForChatPoll { alert } {
+    # <help>
+    # This procedure builds the absolute URI that the chat polling
+    # subsystem uses either to fetch new messages or to fire an
+    # external alert.  It exists so that callers do not need to know
+    # whether the package downloader has already cached a base URI and
+    # which path to append for each operation.
+    #
+    # How it works: it first chooses a base URI: when the
+    # PackageDownloader::baseUri global variable is set (which
+    # [setupForChat] arranges) it uses that; otherwise it falls back to
+    # the engine's AuxiliaryBaseUri.  It then appends one of two
+    # paths: "/chat_alert" when the alert flag is true (so a remote
+    # endpoint can broadcast a notification) or "/chat-poll" when it
+    # is false (the Fossil JSON poll endpoint).
+    #
+    # Tricky details: the hyphen-versus-underscore difference between
+    # the two path suffixes is intentional and matches the Fossil
+    # server's actual URL scheme; do not change it.
+    #
+    # Arguments:
+    #   alert -- A boolean flag.  Pass true to obtain the alert URI;
+    #            pass false to obtain the JSON poll URI.
+    #
+    # Results:
+    #   The combined absolute URI string.
+    # </help>
+
     if {[info exists ::PackageDownloader::baseUri]} then {
       set baseUri $::PackageDownloader::baseUri
     } else {
@@ -158,6 +297,32 @@ namespace eval ::Eagle {
   #       for new chat messages.
   #
   proc logErrorForChatPoll { message } {
+    # <help>
+    # This procedure records an error message produced by the chat
+    # polling subsystem to every available logging sink.  It exists so
+    # that callers do not need to know which logging mechanism is
+    # currently active, and so that a missing sink does not prevent
+    # the message from reaching the others.
+    #
+    # How it works: it first looks up the caller's procedure name (the
+    # first word of the call frame returned by info level for the
+    # caller's level number) and prefixes that name onto the message
+    # so that log readers know who produced it.  It then attempts to
+    # emit the message through three sinks in turn: [tclLog] (the
+    # standard Tcl log channel), hotkey log (the HotKey plugin's log),
+    # and [logRemoteMessage] (an external remote-logging helper).  Each
+    # call is wrapped in catch so that any individual sink being
+    # unavailable does not stop the others from receiving the message.
+    #
+    # Arguments:
+    #   message -- The raw error message text; the caller's procedure
+    #              name will be prepended.
+    #
+    # Results:
+    #   The result of the final catch (typically the result of
+    #   logRemoteMessage), which is generally not useful.
+    # </help>
+
     set level [lindex [info level [info level]] 0]
     set message [appendArgs $level ": " $message]
 
@@ -171,6 +336,33 @@ namespace eval ::Eagle {
   #       the clipboard.
   #
   proc copySecretForChatPoll { envVarName filePattern } {
+    # <help>
+    # This procedure attempts to copy one specific piece of stored
+    # secret data to the system clipboard, where it can then be read
+    # by the chat polling logic to construct a Fossil login.  It
+    # exists so that the polling loop does not need to embed any
+    # password directly and can instead pull one out of the Eagle
+    # secrets repository on demand.
+    #
+    # How it works: it asks Secrets::getSecretSearchCommand to build
+    # the proper command for searching the secrets repository,
+    # passing the value of the named environment variable as the
+    # directory to search (via [getEnvironmentVariable]), the literal
+    # true to request that the matching secret be copied to the
+    # clipboard, and the file pattern that picks which secret file
+    # to use.  The constructed command is then evaluated.
+    #
+    # Arguments:
+    #   envVarName  -- Name of an environment variable whose value is
+    #                  the secrets directory to search.
+    #   filePattern -- A file-name pattern used to select which secret
+    #                  file to copy.
+    #
+    # Results:
+    #   The result of the underlying secret-search command, typically
+    #   a boolean indicating whether the copy succeeded.
+    # </help>
+
     return [eval [::Secrets::getSecretSearchCommand \
         [getEnvironmentVariable $envVarName] true $filePattern]]
   }
@@ -183,6 +375,43 @@ namespace eval ::Eagle {
   #       NOT matched, if they are negative rules).
   #
   proc maybeFilterForChat { xfrom } {
+    # <help>
+    # This procedure decides whether a chat message originating from
+    # the supplied user should be allowed through (true) or silently
+    # ignored (false), based on the configured set of filter rules.
+    # It exists so that the polling loop can apply a flexible
+    # allow-and-deny list against the message originator without
+    # duplicating the matching logic at every call site.
+    #
+    # How it works: it reads the chatFilter namespace variable, a
+    # list whose elements are string-match patterns.  When the
+    # variable is unset, it returns true so messages are allowed
+    # through unchanged.  Otherwise, it walks every rule in order.
+    # Each rule is trimmed of surrounding whitespace; a leading
+    # exclamation point makes the rule negative (the pattern is
+    # stripped of that marker and the rule is satisfied only when
+    # the originator does NOT match), while no leading mark makes
+    # the rule positive (the originator must match).  As soon as
+    # any rule's outcome disagrees with its required orientation,
+    # the result becomes false and the loop terminates with break.
+    # If every rule passes, the result remains true.
+    #
+    # Tricky details: rules are conjunctive (all must pass) rather
+    # than disjunctive, so it is the union of all positive patterns
+    # intersected with the complement of all negative patterns that
+    # is admitted.  Blank rules are skipped implicitly because their
+    # trimmed length is zero; the body checks the length before
+    # examining the first character.
+    #
+    # Arguments:
+    #   xfrom -- The originator string (the value of the JSON
+    #            "xfrom" field) to test against the filter.
+    #
+    # Results:
+    #   True when the message is allowed through; false when at
+    #   least one filter rule rejected it.
+    # </help>
+
     variable chatFilter
 
     if {[info exists chatFilter]} then {
@@ -217,6 +446,71 @@ namespace eval ::Eagle {
   #       a successful query -AND- when there are actually new chat messages.
   #
   proc pollForChat { mtimeVarName xfromVarName } {
+    # <help>
+    # This procedure performs one round of polling against the
+    # configured Fossil chat endpoint and reports whether at least
+    # one new chat message has been observed since the previous
+    # round.  It exists as the work-horse called from the long-
+    # running polling loop, returning the freshest mtime and
+    # originator to the caller via upvar so they can be used to
+    # build a notification.
+    #
+    # How it works: it fetches the chat-poll endpoint via the
+    # package downloader.  On a fetch error it logs through
+    # [logErrorForChatPoll] and silently returns.  On success, it
+    # compiles three regular expressions: one for the mtime field
+    # (a strict ISO 8601 timestamp wrapped in quotes), one for the
+    # xfrom field, and one for the xmsg field.  When the caller
+    # supplied non-empty variable names for mtime and xfrom they
+    # are linked into the local frame via upvar 1.  The response
+    # body is split into lines (CRLF normalized first), and each
+    # line is examined: lines without an xmsg field are skipped
+    # (no message to consider), lines whose xmsg is empty are
+    # skipped (these represent deletions in Fossil's JSON
+    # protocol), lines without an xfrom are skipped, lines whose
+    # xfrom matches the current OS user are skipped (so the
+    # poller does not notify the user about their own messages),
+    # and lines without a parseable mtime are skipped.  Each
+    # surviving mtime is parsed via clock scan using the format
+    # from [getDateTimeFormatForChat].  The first surviving line
+    # primes the localMaximumMtime tracker without being treated
+    # as "new"; subsequent lines are skipped if their mtime is
+    # not strictly greater than the running maximum or if they
+    # are rejected by [maybeFilterForChat], and otherwise advance
+    # the local maximum.  After processing, the persistent
+    # maximumMtime namespace variable is consulted: on first ever
+    # call it is initialized from the local maximum and the
+    # procedure returns false (no transition possible yet); on
+    # later calls, false is returned when the local maximum has
+    # not advanced past the persistent one, and true is returned
+    # (after updating the persistent value) when it has.
+    #
+    # Tricky details: the upvar links use a non-empty length
+    # check so callers can opt out of receiving either piece of
+    # information by passing an empty name.  The regular
+    # expressions use the -skip 1 form so that only the captured
+    # group is bound into the named variable (the whole match is
+    # discarded).  The "first time through" semantics matter for
+    # the loop driver: the very first invocation never reports a
+    # transition because there is no prior maximum to compare
+    # against, even when messages already exist in the stream.
+    #
+    # Arguments:
+    #   mtimeVarName -- Name of a caller variable that should
+    #                   receive the latest seen mtime (an integer
+    #                   number of seconds).  Pass the empty string
+    #                   to skip.
+    #   xfromVarName -- Name of a caller variable that should
+    #                   receive the originator of the latest seen
+    #                   message.  Pass the empty string to skip.
+    #
+    # Results:
+    #   True only when the poll succeeded and at least one new
+    #   chat message was observed since the prior call; false in
+    #   every other case, including fetch errors and the very
+    #   first call.
+    # </help>
+
     if {[catch {
       ::PackageDownloader::getPackageFile [getUriForChatPoll false]
     } data] == 0} then {
@@ -308,6 +602,51 @@ namespace eval ::Eagle {
   #       (possibly) new chat messages.
   #
   proc notifyUriForChat { mtime xfrom to } {
+    # <help>
+    # This procedure delivers a chat-message notification by
+    # making an HTTP request against the configured alert URI.
+    # It exists as the default notifyCommand used by the polling
+    # loop, suitable for triggering a server-side broadcast such
+    # as a chatops endpoint or a generic webhook.
+    #
+    # How it works: if the originator is the current OS user the
+    # call returns false without doing anything (the user does
+    # not need to be notified about their own messages).
+    # Otherwise it constructs a human-readable message that
+    # includes the originator and the timestamp formatted with
+    # the display variant of [getDateTimeFormatForChat].  It then
+    # asks [getUriForChatPoll] for the alert URI and walks two
+    # parallel lists named to and message that hold the query
+    # parameter names and values.  For each parameter with both
+    # a non-empty name and value, the appropriate query
+    # separator (the first ? or a subsequent &) is appended,
+    # followed by the URI-escaped name, an equals sign, and the
+    # URI-escaped value.  Finally, uri download is invoked with
+    # -timeouttype network -inline so the request body is
+    # returned directly.  Regardless of success or failure, the
+    # finally block logs the notification message to [tclLog] and
+    # to the HotKey log.
+    #
+    # Tricky details: the two-list pairing with foreach is a
+    # compact way to iterate parameters but requires the lists
+    # to stay in lock-step; both currently contain just the to
+    # parameter.  The use of -timeouttype network means the
+    # call honors whatever value [checkEagleBeta51] (or the user)
+    # has applied to the Network timeout slot.
+    #
+    # Arguments:
+    #   mtime -- Unix-style integer timestamp of the latest seen
+    #            chat message.
+    #   xfrom -- The message originator (a user name string).
+    #   to    -- The notification target identifier (an opaque
+    #            value forwarded to the alert endpoint).
+    #
+    # Results:
+    #   The body returned by the alert endpoint when the request
+    #   was attempted; false when the originator was the local
+    #   user and the notification was skipped.
+    # </help>
+
     if {$xfrom ne $::tcl_platform(user)} then {
       set message [appendArgs \
           "New chat message from " $xfrom " at " [clock \
@@ -347,6 +686,47 @@ namespace eval ::Eagle {
   #       new chat messages using the Twilio SMS API.
   #
   proc notifySmsForChat { mtime xfrom to } {
+    # <help>
+    # This procedure delivers a chat-message notification as an
+    # SMS message through the Twilio API.  It is an alternative
+    # notifyCommand for the polling loop, suitable when the user
+    # wants a real text message rather than a webhook callback.
+    #
+    # How it works: when the originator is the current OS user
+    # the call returns false without sending anything.
+    # Otherwise it constructs the same human-readable message as
+    # [notifyUriForChat] (originator and the timestamp formatted
+    # via the display variant of [getDateTimeFormatForChat]).  It
+    # then requires the Eagle.Sms package and reads three
+    # environment variables that hold the Twilio credentials:
+    # TwilioAccountSid (the account string identifier),
+    # TwilioAuthToken (the authorization token), and
+    # TwilioPhoneNumber (the sending phone number).  Each missing
+    # variable raises an error with a descriptive message.  With
+    # the credentials in hand it invokes
+    # [sendViaShortMessageService] with the credentials, the
+    # destination phone number, and the constructed message.
+    # The finally block logs the notification message to [tclLog]
+    # and to the HotKey log regardless of success or failure.
+    #
+    # Tricky details: the credentials live in environment
+    # variables specifically so they do not need to appear in
+    # any script file; rotating the Twilio token does not
+    # require editing or redeploying this code.
+    #
+    # Arguments:
+    #   mtime -- Unix-style integer timestamp of the latest seen
+    #            chat message.
+    #   xfrom -- The message originator (a user name string).
+    #   to    -- The destination phone number in E.164 form, as
+    #            required by Twilio.
+    #
+    # Results:
+    #   The result of sendViaShortMessageService when the SMS
+    #   was attempted; false when the originator was the local
+    #   user and the notification was skipped.
+    # </help>
+
     if {$xfrom ne $::tcl_platform(user)} then {
       set message [appendArgs \
           "New chat message from " $xfrom " at " [clock \
@@ -388,6 +768,85 @@ namespace eval ::Eagle {
   proc loopThePoolForChat {
           {envVarName KEYS_DIR} {filePattern ""} {milliseconds 10000} \
           {notifyCommand ::notifyUriForChat} {to ""} } {
+    # <help>
+    # This procedure runs the long-lived polling loop that
+    # repeatedly queries the configured Fossil chat endpoint and
+    # fires a notification for each newly observed message.  It
+    # is the top-level worker that an interactive user typically
+    # invokes after calling [setupForChat], and it runs until the
+    # loopThePoolForChatDone global is set.
+    #
+    # How it works: when the UrnPassword environment variable is
+    # not already set, it tries to fetch the Fossil login
+    # password by calling [copySecretForChatPoll], which puts the
+    # secret on the system clipboard, and then reads it back via
+    # System.Windows.Forms.Clipboard.GetText into UrnPassword.
+    # The Secrets module is asked to scrub the clipboard
+    # afterwards via a finally block.  With the credentials in
+    # hand it calls PackageDownloader::resetCookieAndLogin using
+    # the current OS user and the UrnPassword.  If login fails
+    # the error is reported through [logErrorForChatPoll] and the
+    # loop never starts.  Otherwise, the loop runs while the
+    # loopThePoolForChatDone variable is unset.  Each iteration
+    # initializes mtime to 0 and xfrom to empty, then invokes
+    # [pollForChat] inside a catch.  When [pollForChat] returns
+    # true, the notifyCommand is built up as a list with the
+    # mtime, xfrom, and to arguments and is invoked via catch
+    # so a notification failure cannot break the loop; the
+    # result accumulator advances from -1 to 1 on the first
+    # successful notification, then increments on each
+    # subsequent one.  A status PING message is built (with the
+    # timestamp and originator when mtime is non-zero, or just
+    # PING when not) and logged through [tclLog] and the HotKey
+    # log.  Finally, an after callback is registered to set the
+    # chatPing variable after the configured delay, and vwait
+    # -force -resetcancel -- ::chatPing blocks the loop until
+    # that callback fires or the wait is force-cancelled.  When
+    # the loop exits, the finally block calls
+    # PackageDownloader::logoutAndResetCookie inside a catch to
+    # clean up the session, again reporting any failure through
+    # [logErrorForChatPoll].  When either the OS user or the
+    # password is missing, the loop is not entered and "missing
+    # user or password" is logged.
+    #
+    # Tricky details: result starts at -1 as a sentinel meaning
+    # "no notification ever succeeded"; this is what is returned
+    # when login fails or when the loop runs but nothing new
+    # arrives.  The vwait uses -force so it cannot be cancelled
+    # by a casual cancel command, and -resetcancel so any
+    # pending cancellation is cleared before waiting.  The
+    # clipboard is read inside a try/finally block specifically
+    # so the secret cannot linger on the clipboard if an
+    # exception fires between copy and read.
+    #
+    # Arguments:
+    #   envVarName    -- Name of an environment variable whose
+    #                    value is the secrets directory to
+    #                    search.  Defaults to KEYS_DIR.
+    #   filePattern   -- Optional file-name pattern that picks a
+    #                    specific secret file inside that
+    #                    directory; empty means use the
+    #                    default search behavior.
+    #   milliseconds  -- Delay between polls, in milliseconds.
+    #                    Defaults to 10 seconds.
+    #   notifyCommand -- A command prefix invoked with the
+    #                    mtime, xfrom, and to arguments to
+    #                    deliver each notification.  Defaults
+    #                    to ::notifyUriForChat.  An empty
+    #                    string disables notification (only
+    #                    PING messages are logged).
+    #   to            -- The notification target identifier
+    #                    forwarded to the notifyCommand; format
+    #                    depends on the command (an opaque
+    #                    string for URI notification, an E.164
+    #                    phone number for SMS).
+    #
+    # Results:
+    #   -1 when login failed or no notification was ever
+    #   delivered; otherwise the running count of successfully
+    #   delivered notifications.
+    # </help>
+
     if {![info exists ::env(UrnPassword)]} then {
       try {
         if {[copySecretForChatPoll $envVarName $filePattern]} then {

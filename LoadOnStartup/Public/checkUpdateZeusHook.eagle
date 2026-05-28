@@ -25,6 +25,39 @@ namespace eval ::Eagle {
   #       initialized or cleaned up.
   #
   proc setupEncryptionPasswordAndSalt { setup } {
+    # <help>
+    # This procedure either initializes or tears down the password and salt
+    # entries of the global "zeus" array, which are later consumed by the
+    # encryption-aware update-script hook installed by
+    # [hookGetUpdateScriptData].  It exists so that callers (typically the
+    # high-level [enableZeusUpdateHook] entry point) can manage the lifetime
+    # of these secret-bearing entries in one place rather than scattering
+    # the literal credential material throughout the script.
+    #
+    # How it works: when "setup" is true, the procedure assigns hard-coded
+    # placeholder credentials (a password and a salt) into the corresponding
+    # "zeus" array entries.  When "setup" is false, it walks a small list of
+    # the entry names it manages and uses the unset variant that scrubs the
+    # backing store and treats the value as a zero-string so that the secret
+    # bytes are not left lingering in memory longer than necessary.
+    #
+    # Tricky details: the password and salt baked in here are intentionally
+    # the same fixed values used to encrypt the test update scripts; a TODO
+    # in the body flags that real deployments should source these from a
+    # secure provider rather than relying on the literals.  Because the
+    # values live in the global "zeus" array, they are visible to any code
+    # that can inspect that array while the hook is active.
+    #
+    # Arguments:
+    #   setup -- Boolean-like flag.  When true, the password and salt entries
+    #            are populated.  When false, both entries are removed using
+    #            the secret-scrubbing form of unset.
+    #
+    # Results:
+    #   The result of the underlying assignment or unset; callers should not
+    #   rely on its specific value.
+    # </help>
+
     global zeus
 
     #
@@ -47,6 +80,41 @@ namespace eval ::Eagle {
   #       are initialized or cleaned up.
   #
   proc setupEncryptionParameters { setup } {
+    # <help>
+    # This procedure either initializes or tears down the non-secret
+    # encryption parameter entries of the global "zeus" array.  These are
+    # the supporting values (text encoding, key-derivation iteration count,
+    # and hash algorithm name) that the encryption-aware update-script hook
+    # passes through to the underlying decryption call alongside the
+    # password and salt.  It exists as a companion to
+    # [setupEncryptionPasswordAndSalt] so that the secret material and the
+    # plain configuration knobs can be managed in separate steps.
+    #
+    # How it works: when "setup" is true, the procedure assigns a sensible
+    # set of defaults -- "utf-8" for the encoding, one thousand for the
+    # key-derivation iteration count, and an empty string for the hash
+    # algorithm name (which selects the legacy default).  When "setup" is
+    # false, it walks the names it manages and uses the scrubbing form of
+    # unset so the entries are removed cleanly.
+    #
+    # Tricky details: the empty hash algorithm name is intentional and
+    # documented in the related hook procedure as a legacy compatibility
+    # affordance, so callers should not "fix" it by substituting a concrete
+    # algorithm without understanding the implications.  The iteration
+    # count is modest by modern standards because these parameters are
+    # paired with the test encryption credentials.
+    #
+    # Arguments:
+    #   setup -- Boolean-like flag.  When true, the encoding, iteration
+    #            count, and hash algorithm name entries are populated with
+    #            defaults.  When false, all three entries are removed using
+    #            the secret-scrubbing form of unset.
+    #
+    # Results:
+    #   The result of the underlying assignment or unset; callers should
+    #   not rely on its specific value.
+    # </help>
+
     global zeus
 
     if {$setup} then {
@@ -68,6 +136,55 @@ namespace eval ::Eagle {
   #       decryption, prior to evaluating update scripts, if needed.
   #
   proc hookGetUpdateScriptData {} {
+    # <help>
+    # This procedure installs a transparent decryption wrapper around the
+    # core script library's [getUpdateScriptData] command, so that update
+    # scripts which were stored in encrypted form are automatically decoded
+    # before being evaluated by the auto-update machinery.  It is the heart
+    # of the Zeus update hook; everything else in this file either prepares
+    # the state it consumes or tears down the wrapper it installs.
+    #
+    # How it works: the procedure first checks for an existing renamed copy
+    # of the original command (named with a double-underscore prefix); if
+    # one is found the hook is already installed and the call is treated as
+    # an idempotent no-op.  Otherwise, it validates that every entry of the
+    # global "zeus" array that the wrapper will need is present and
+    # non-empty -- the encoding name, password, salt, and iteration count
+    # are all required to be non-empty strings, while the hash algorithm
+    # name is permitted to exist as an empty string (for legacy default
+    # selection, with a disabled stricter check left in the body as a
+    # historical note).  After validation, the Zeus enterprise and
+    # cryptography packages are required, the original command's argument
+    # list is captured, and the original command is renamed to its
+    # double-underscore form.  A replacement command is then defined whose
+    # signature appends additional formal parameters initialized to the
+    # current values from the "zeus" array; each is added as a two-element
+    # default-value pair so the literal data is captured at procedure
+    # creation time.  The body of the replacement calls the original
+    # (renamed) command via uplevel to retrieve the raw data, returns the
+    # raw data unchanged when it is not recognized as an encrypted script,
+    # and otherwise evaluates the data (to produce the ciphertext) and
+    # decrypts it using the captured parameters.
+    #
+    # Tricky details: the captured credentials become part of the proc's
+    # argument defaults, so the password and salt outlive the running
+    # "zeus" array entries and persist as long as the wrapper itself
+    # exists; the only sanctioned cleanup path is [unhookGetUpdateScriptData].
+    # The replacement procedure relies on the variable "uri" being among
+    # the original command's formal arguments (so that the uplevel call can
+    # reach it by name); this is an intentional coupling to the core
+    # library's signature.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An empty string on a fresh install, or whatever the early-return
+    #   produces when the hook is already in place; callers should not
+    #   rely on the specific value.  Throws an error if any required entry
+    #   of the "zeus" array is missing or empty.
+    # </help>
+
     global zeus
 
     if {[llength [info commands __getUpdateScriptData]] > 0} then {return}
@@ -136,6 +253,37 @@ namespace eval ::Eagle {
   #       state.
   #
   proc unhookGetUpdateScriptData {} {
+    # <help>
+    # This procedure removes the transparent decryption wrapper installed
+    # by [hookGetUpdateScriptData], restoring the core script library's
+    # [getUpdateScriptData] command to its original behavior.  It exists
+    # as the symmetric counterpart of the install routine so that the hook
+    # can be cleanly toggled off without restarting the interpreter.
+    #
+    # How it works: it first checks whether the double-underscore saved
+    # copy of the original command exists; if not, the hook is not
+    # currently installed and the call is treated as an idempotent no-op.
+    # Otherwise, the wrapper procedure is deleted by renaming it to the
+    # empty string, and the saved original is renamed back to its public
+    # name so that subsequent callers reach the unmodified library
+    # implementation again.
+    #
+    # Tricky details: this routine deliberately does not touch the
+    # password, salt, or other "zeus" array entries.  Any leftover secret
+    # material in those entries (and any copy captured in argument
+    # defaults of the wrapper, which is no longer reachable after the
+    # rename) must be scrubbed by other code, typically by the high-level
+    # [enableZeusUpdateHook] driver.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An empty string on a successful uninstall, or the early-return
+    #   value when the hook was not installed; callers should not rely on
+    #   the specific value.
+    # </help>
+
     if {[llength [info commands __getUpdateScriptData]] == 0} then {return}
 
     rename getUpdateScriptData ""
@@ -148,6 +296,50 @@ namespace eval ::Eagle {
   #
   # <public>
   proc enableZeusUpdateHook { {enable ""} } {
+    # <help>
+    # This procedure is the public, high-level driver for the Zeus update
+    # hook.  It can install the hook, uninstall it, or report whether it
+    # is currently installed, depending on whether and how its single
+    # optional argument is supplied.  External callers and interactive
+    # users should normally use this procedure rather than calling the
+    # lower-level setup and hook routines directly, because it sequences
+    # the steps in the correct order and pairs each install action with
+    # the matching teardown action.
+    #
+    # How it works: if "enable" is supplied as a non-empty string, the
+    # value is interpreted as a boolean.  When true, encryption
+    # parameters are initialized, the password and salt are populated,
+    # and the [getUpdateScriptData] wrapper is installed (in that order
+    # so the wrapper has all of its inputs when it captures them).  When
+    # false, the inverse sequence runs -- wrapper first, then
+    # password/salt, then parameters -- so that no caller can observe a
+    # half-torn-down state.  After either install or teardown, the debug
+    # cleanup and collect commands are invoked to encourage prompt
+    # release of any sensitive intermediate values.  If "enable" is
+    # omitted or supplied as the empty string, the procedure instead
+    # returns a boolean indicating whether the wrapper is currently
+    # installed, detected via the presence of the renamed original
+    # command.
+    #
+    # Tricky details: the toggle and query modes are distinguished only
+    # by the string length of the argument, so passing the literal empty
+    # string is functionally identical to passing nothing -- callers must
+    # supply an actual boolean (such as "true" or "1") to act, and any
+    # other value will surface as an error from the underlying boolean
+    # comparison.
+    #
+    # Arguments:
+    #   enable -- Optional.  When non-empty, interpreted as a boolean: a
+    #             true value installs the hook and a false value removes
+    #             it.  When empty or omitted, the procedure switches into
+    #             query mode and reports the current install state.
+    #
+    # Results:
+    #   In query mode, a boolean indicating whether the hook is currently
+    #   installed.  In toggle mode, an unspecified value from the trailing
+    #   debug commands; callers should not rely on it.
+    # </help>
+
     global zeus
 
     if {[string length $enable] > 0} then {
@@ -175,6 +367,40 @@ namespace eval ::Eagle {
   #
   # <public>
   proc cleanupZeusUpdateHook {} {
+    # <help>
+    # This procedure removes every procedure that this script file defined,
+    # leaving the interpreter in a state where the Zeus update hook can no
+    # longer be installed, uninstalled, or queried from these names.  It
+    # exists so that the entire surface area introduced by sourcing the
+    # file can be retracted with a single call, typically as part of a
+    # broader cleanup of an interactive or test session.
+    #
+    # How it works: it issues a series of rename-to-empty-string commands
+    # against each of the six procedures defined here -- the two encryption
+    # setup helpers, the install and uninstall hook routines, the
+    # high-level enable driver, and finally this procedure itself.  All of
+    # those renames are wrapped in a single catch so that any individual
+    # failure (for example, a procedure that has already been removed)
+    # does not prevent the remaining renames from being attempted.
+    #
+    # Tricky details: this procedure renames itself as the last action of
+    # the batch, so the calling frame will not be able to invoke
+    # [cleanupZeusUpdateHook] again after a successful run.  It also does
+    # NOT clean up any global state -- the "zeus" array entries (including
+    # any leftover password and salt material) and any installed hook
+    # wrapper around [getUpdateScriptData] are unaffected.  Callers that
+    # care about that state should first invoke [enableZeusUpdateHook
+    # false] before calling this procedure.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the surrounding catch, which is zero on full success
+    #   or a non-zero status if any of the renames failed; callers should
+    #   not rely on the specific value.
+    # </help>
+
     catch {
       rename setupEncryptionPasswordAndSalt ""
       rename setupEncryptionParameters ""

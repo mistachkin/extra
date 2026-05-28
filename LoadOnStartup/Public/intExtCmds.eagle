@@ -2502,6 +2502,61 @@ namespace eval :: {
   }
 
   proc #kapoksetup { iis {rootBaseUri ""} } {
+    # <help>
+    # This procedure prepares the global environment that the Kapok and Harpy
+    # test suites expect.  It computes a base URI for the Kapok web endpoints,
+    # synthesizes the full set of "ping", "provision", "renewal", "request",
+    # "revocation", "support", "script", "storage", and "test" base-and-relative
+    # URI pairs from that root, and publishes them as global variables along
+    # with a server port value (also exported into the process environment).
+    # It exists so that the higher-level command kapoktest (and direct callers)
+    # can switch between an IIS-hosted deployment and the ASP.NET Development
+    # Server, optionally pointed at a fully custom root URI, with one call.
+    #
+    # How it works: if "rootBaseUri" is empty, the RootBaseUri environment
+    # variable is consulted as a fallback (this matches the Harpy.Test package
+    # convention so the two test suites can share settings).  When a root URI
+    # is supplied, it is validated by attempting to construct an absolute
+    # System.Uri object; on failure the procedure raises an error.  The
+    # validated URI's port becomes the server port, and the "useLocalHost"
+    # flag is cleared so callers know the target is remote.  When no root URI
+    # is supplied, the procedure picks a default port -- either taken from the
+    # KAPOK_SETUP_PORT environment variable when it is a valid integer, or a
+    # hard-coded default that differs depending on whether IIS or the ASP.NET
+    # Development Server is being used -- and constructs a localhost base URI.
+    # In the IIS branch, the scheme is upgraded to https on a specific known
+    # host (LACHRYMOSE) because that machine has the appropriate certificate
+    # configured; everywhere else it stays http.  The two branches also use
+    # different relative URI prefixes because the IIS deployment serves the
+    # endpoints under a "kapok/..." path while the development server does
+    # not.
+    #
+    # Tricky details: every URI is published as a pair of globals (a base URI
+    # plus a relative URI fragment with a trailing question mark, ready for
+    # query-string concatenation), not as a single combined URL.  The
+    # UseLocalHost and RootBaseUri environment variables are set or unset to
+    # reflect the chosen mode so that downstream test code can observe the
+    # configuration without re-deriving it.  The procedure intentionally
+    # leaves the published globals in place when it returns -- the caller
+    # (typically kapoktest) is responsible for cleaning them up.
+    #
+    # Arguments:
+    #   iis         -- Boolean.  When true, configure the URIs for an IIS
+    #                  hosted Kapok deployment (kapok/... path prefixes and
+    #                  the IIS default port 11452).  When false, configure
+    #                  for the ASP.NET Development Server (no path prefix and
+    #                  the development-server default port 1195).
+    #   rootBaseUri -- Optional explicit absolute base URI.  If empty, the
+    #                  RootBaseUri environment variable is used; if that is
+    #                  also empty, a localhost URI is synthesized.  When
+    #                  provided, it must parse as an absolute System.Uri or
+    #                  the procedure raises an error.
+    #
+    # Results:
+    #   The empty string.  The real outputs are the published global
+    #   variables and environment-variable side effects described above.
+    # </help>
+
     #
     # HACK: For the Harpy test suite, fallback to the RootBaseUri
     #       environment variable if the "rootBaseUri" argument is

@@ -20,6 +20,34 @@
 #
 namespace eval :: {
   proc eagle_showHistoryHelp {} {
+    # <help>
+    # This procedure prints the interactive command history help banner to
+    # the interpreter host.  It exists so the shell startup machinery can
+    # advertise the history management commands (#!, #!!, #@, #@@, ##!,
+    # and ##0) the first time the interactive loop appears, without
+    # hard-coding the list of commands in two places.
+    #
+    # How it works: it extracts the text contained in the [eagle_getProcedureMap]
+    # procedure's `# <help>` block by asking the internal HelpOps class to
+    # parse the body, then emits any non-empty text via [host result] using
+    # the Break severity, surrounded by newlines for readability.  If the
+    # global "no" array contains the element "showHistoryHelp", the entire
+    # procedure becomes a no-op, providing an easy opt-out for callers that
+    # do not want to see the banner.
+    #
+    # Tricky details: it uses NonPublic reflection against the internal
+    # HelpOps type to obtain the default text-formatting flags and to run
+    # the help-extraction routine, so it requires a non-safe interpreter
+    # with object access enabled.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The empty string.  The visible effect is that the history help text
+    #   is written to the interpreter host.
+    # </help>
+
     if {![info exists ::no(showHistoryHelp)]} then {
       set textFlags [object invoke -flags +NonPublic \
           Eagle._Components.Private.HelpOps GetDefaultTextFlags]
@@ -68,6 +96,35 @@ namespace eval :: {
   }
 
   proc eagle_isHistoryCommand { text } {
+    # <help>
+    # This procedure tests whether the specified text begins with one of the
+    # history management command names (the entries returned by
+    # [eagle_getProcedureMap], e.g. #!, #!!, #@, #@@, ##!, and ##0).  It is
+    # used to suppress recording of history-management commands themselves --
+    # both when capturing commands into the in-memory log inside
+    # [eagle_interactiveCommandCallback] and when importing or searching
+    # commands inside [eagle_searchCommandsFrom].
+    #
+    # How it works: each command name from the procedure map is compared
+    # against a prefix of the same length taken from the start of the text.
+    # The comparison is exact and case-sensitive.  The first match short-
+    # circuits and returns true.  The text is treated as a prefix only; any
+    # trailing characters (including spaces, arguments, or further text) do
+    # not affect the result.
+    #
+    # Tricky details: a zero-length text is treated as not a history command.
+    # Each iteration unpacks the seven map fields via the [foreach] header,
+    # but only the command name is used here.
+    #
+    # Arguments:
+    #   text -- The candidate command line.  Only its leading characters are
+    #           examined.
+    #
+    # Results:
+    #   The literal string true if the text starts with a known history
+    #   management command name; otherwise the literal string false.
+    # </help>
+
     set length [string length $text]
 
     if {$length > 0} then {
@@ -93,6 +150,39 @@ namespace eval :: {
   }
 
   proc eagle_setupCommandSearchProcedures {} {
+    # <help>
+    # This procedure creates the user-visible history command procedures
+    # (one for each entry returned by [eagle_getProcedureMap]) by cloning
+    # the body of the base procedure [eagle_evaluateCommandFrom] and
+    # substituting placeholder tokens with the configured values for the
+    # particular command.  It is the one-time wiring step that produces the
+    # #!, #!!, #@, #@@, ##!, and ##0 commands seen at the interactive
+    # prompt.
+    #
+    # How it works: the procedure map is walked using the standard
+    # seven-field unpacking pattern.  For each entry, the argument list and
+    # body of [eagle_evaluateCommandFrom] are retrieved with [info args] and
+    # [info body], and the body is rewritten with [string map] so that the
+    # placeholders %commandName%, %index%, %limit%, %matchAll%,
+    # %useDatabase%, %importOnly%, and %whatIf% are replaced by the
+    # per-command settings.  The transformed body is then bound to the
+    # desired command name with a fresh [proc] definition.
+    #
+    # Tricky details: this is invoked once at script load time (gated by
+    # the global "no(setupCommandSearchProcedures)" flag near the end of
+    # this file).  Because the new procedures share the base procedure's
+    # argument list and body shape, runtime behavior is identical except
+    # for the substituted defaults.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the last [proc] command, which is the empty string.
+    #   The visible effect is that the history command procedures are
+    #   created in the global namespace.
+    # </help>
+
     set commands [eagle_getProcedureMap]
     set baseCommandName eagle_evaluateCommandFrom
 
@@ -112,6 +202,33 @@ namespace eval :: {
   }
 
   proc eagle_resetStagedCommand { {default ""} } {
+    # <help>
+    # This procedure clears the currently staged interactive command, if
+    # any, returning the value it had immediately before being cleared.
+    # The staged command is the command most recently selected by a
+    # history search (typically via #! or #!!) and is normally executed
+    # later by the user through the #@ command.  This procedure is the
+    # back end of the #@@ command and lets the user abandon a staged
+    # command without running it.
+    #
+    # How it works: the per-interpreter debugger array is aliased into
+    # this frame at level zero, and its StagedCommand element is checked
+    # for existence.  When present, the value is captured, the element is
+    # removed with [unset -nocomplain], and the captured value is
+    # returned.  When the element is absent, the default value is
+    # returned and no state is changed.  See also [eagle_setStagedCommand]
+    # and [eagle_evaluateStagedCommand], which read and execute the same
+    # slot.
+    #
+    # Arguments:
+    #   default -- The value to return when there is no staged command.
+    #              Optional; defaults to the empty string.
+    #
+    # Results:
+    #   The previously staged command if one existed; otherwise the value
+    #   of the default argument.
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     if {[info exists debugger(StagedCommand)]} then {
@@ -124,6 +241,33 @@ namespace eval :: {
   }
 
   proc eagle_setStagedCommand { command {default ""} } {
+    # <help>
+    # This procedure records the specified command as the currently staged
+    # interactive command, returning the previously staged value (or the
+    # default if there was none).  It is called by
+    # [eagle_evaluateCommandFrom] after a successful history search to
+    # remember the matched command so the user can later execute it via #@
+    # or clear it via #@@.
+    #
+    # How it works: the per-interpreter debugger array is aliased into
+    # this frame at level zero.  If the StagedCommand element already
+    # exists, its current value is captured before being overwritten;
+    # otherwise the slot is created with the new command and the default
+    # is returned.  See [eagle_resetStagedCommand] for the inverse
+    # operation and [eagle_evaluateStagedCommand] for the consumer.
+    #
+    # Arguments:
+    #   command -- The command string to store as the new staged command.
+    #   default -- The value to return when there was no previously
+    #              staged command.  Optional; defaults to the empty
+    #              string.
+    #
+    # Results:
+    #   The previously staged command, if one existed; otherwise the
+    #   value of the default argument.  After this call, the StagedCommand
+    #   slot always holds the new command.
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     if {[info exists debugger(StagedCommand)]} then {
@@ -137,6 +281,32 @@ namespace eval :: {
   }
 
   proc eagle_evaluateStagedCommand {} {
+    # <help>
+    # This procedure executes the currently staged interactive command in
+    # the caller's frame and, on success, clears the staged slot.  It is
+    # the back end of the #@ command, providing the "actually run the
+    # selected history entry" half of the find-then-run workflow that
+    # begins with #! or #!! placing a command into the staging slot via
+    # [eagle_setStagedCommand].
+    #
+    # How it works: the per-interpreter debugger array is aliased at
+    # level zero and its StagedCommand element is consulted.  If present,
+    # the command is evaluated via [uplevel 1] inside a [catch] so it
+    # runs in the caller's variable context and any error result can be
+    # converted to a clean script error.  On success, the staged slot is
+    # cleared with [unset -nocomplain] and the script result is returned.
+    # On failure, the captured error message is re-raised with [error].
+    # If no command is staged, an error with the message "there is no
+    # staged command" is raised.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The result of the staged command on success.  On failure or when
+    #   no command is staged, an error is raised.
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     if {[info exists debugger(StagedCommand)]} then {
@@ -154,6 +324,51 @@ namespace eval :: {
   }
 
   proc eagle_processSearchArguments { args } {
+    # <help>
+    # This procedure parses a list of name and value pairs that configure
+    # a history search (the same pairs accepted by the user-visible #!,
+    # #!!, #@, #@@, ##!, and ##0 commands) and writes their validated
+    # values back into the caller's frame.  It exists so the per-command
+    # wrappers produced by [eagle_setupCommandSearchProcedures] and the
+    # base procedure [eagle_evaluateCommandFrom] do not have to repeat
+    # the option-validation logic for every recognized option.
+    #
+    # How it works: a fixed list of option variable names is imported
+    # into this frame from the caller via [upvar 1], so every assignment
+    # made here directly mutates the caller's variables of the same
+    # names.  The arguments are walked two at a time using a [foreach]
+    # name-value loop and dispatched through a [switch] on the option
+    # name.  Boolean options (any, autoWildcard, noCase, matchAll,
+    # useDatabase, importOnly, quiet, verbose, whatIf) require values
+    # accepted by [string is boolean -strict].  The index option accepts
+    # an integer, the literal "end", or "end-N" for non-negative N.  The
+    # limit option requires an integer.  The mode option must be the
+    # empty string, "exact", "glob", or "regexp" and is stored as a
+    # one-element list (so it can carry mode-modifier sub-flags later).
+    # The search option appends its value to the searches list, allowing
+    # multiple search terms to be specified in a single argument vector.
+    # Any unrecognized option name raises an error.  When verbose is
+    # already true, each accepted setting is echoed to the interpreter
+    # host via [host result] Continue.
+    #
+    # Tricky details: validation errors are suppressed when the caller's
+    # quiet variable is true.  The matchAll name appears in the boolean
+    # arm of the switch even though it is not in the imported list at
+    # the top -- it is imported indirectly when the caller already has
+    # it in scope (every history command wrapper does).
+    #
+    # Arguments:
+    #   args -- Zero or more option name and value pairs interleaved.
+    #           Recognized names: any, mode, index, limit, autoWildcard,
+    #           noCase, matchAll, useDatabase, importOnly, quiet,
+    #           verbose, whatIf, and search.  Values must satisfy the
+    #           per-option rules described above.
+    #
+    # Results:
+    #   The empty string.  The visible effect is that the corresponding
+    #   variables in the caller's frame are updated in place.
+    # </help>
+
     foreach name [list \
         any mode index limit autoWildcard noCase useDatabase \
         importOnly quiet verbose whatIf searches] {
@@ -259,6 +474,33 @@ namespace eval :: {
   }
 
   proc eagle_getCmdsDirectory {} {
+    # <help>
+    # This procedure returns the directory used to store the per-user
+    # interactive command history (the cmds.eagle text log, the
+    # cmds.eagle.db SQLite database, and any per-session sequenced
+    # cmds-XXXX.eagle files).  It is the single point that resolves the
+    # storage location, so every other history helper -- including
+    # [eagle_getCmdsFileName], [eagle_getCmdsDatabaseFileName], and the
+    # callers that consume them -- agree on where to read and write.
+    #
+    # How it works: the directory is resolved with a small fallback
+    # chain.  First, if the environment variable EAGLE_USER_CMDS_DIR is
+    # set, its value is returned verbatim, allowing an explicit override.
+    # Otherwise, if the XDG_STATE_HOME environment variable is set, its
+    # value is returned, matching the XDG Base Directory Specification on
+    # systems that observe it.  Otherwise, the literal "~" is returned,
+    # which expands to the current user's home directory when later
+    # passed to [file normalize] or [file join].
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   A directory path string suitable for use with [file join].  The
+    #   directory is not created or validated here; callers are
+    #   responsible for handling missing or inaccessible directories.
+    # </help>
+
     if {[info exists ::env(EAGLE_USER_CMDS_DIR)]} then {
       return $::env(EAGLE_USER_CMDS_DIR)
     } elseif {[info exists ::env(XDG_STATE_HOME)]} then {
@@ -271,6 +513,74 @@ namespace eval :: {
   proc eagle_getCmdsFileName {
           {quiet false} {verbose false} {readOnly true} {fileTypeVarName ""}
           {seqNumVarName ""} } {
+    # <help>
+    # This procedure returns the fully normalized file name used to read
+    # or write the interactive command history text log.  Two layouts are
+    # supported: a single shared file named cmds.eagle in the directory
+    # returned by [eagle_getCmdsDirectory], and a per-session unique file
+    # named cmds-XXXXXXXXXXXXXXXX.eagle (where the X's are a 16-character
+    # hex sequence number).  The choice between layouts is controlled by
+    # the saveUniqueCmdsFile element of the per-interpreter debugger
+    # array.
+    #
+    # How it works: when saveUniqueCmdsFile is not set, the procedure
+    # returns the shared cmds.eagle path, sets the optional seqNum
+    # out-parameter to the string "none", and sets the optional fileType
+    # out-parameter to "existing shared" if the file already exists, or
+    # "shared" otherwise.
+    #
+    # When saveUniqueCmdsFile is set, the procedure locates a sibling
+    # cmds.eagle.seqNum file that holds the last allocated sequence
+    # number as a 19-byte ASCII representation (a "0x" prefix, 16 hex
+    # digits, and a trailing newline).  If that file exists with exactly
+    # the expected size, its trimmed contents are read and incremented;
+    # otherwise a fresh seed is derived from the expression engine's
+    # random() value xor'd with [info context].  The chosen number is
+    # formatted as a 16-character uppercase hex string and assigned to
+    # the optional seqNum out-parameter.  When readOnly is false, the
+    # new number is also written back to the sequence file (preceded by
+    # "0x" and followed by a newline).  The returned file name is then
+    # constructed as cmds-SEQNUM.eagle in the same directory, and the
+    # optional fileType out-parameter is set to "existing uniquely" or
+    # "uniquely" depending on whether the unique file already exists.
+    #
+    # Tricky details: a malformed sequence file (one whose size is not
+    # zero and not exactly 19 bytes) causes an empty string to be
+    # returned, which signals callers (notably
+    # [eagle_interactiveCommandCallback]) to cancel the originally
+    # entered command rather than risk overwriting the file; a status
+    # message is also emitted via [host result] unless quiet is true.  A
+    # zero-byte sequence file is tolerated -- it triggers fresh seed
+    # generation -- and a status message is also emitted in that case
+    # when not quiet.  Gaps in the numeric sequence may appear when the
+    # user later cancels a save operation, since the next number is
+    # reserved before the save is committed.
+    #
+    # Arguments:
+    #   quiet           -- When true, suppresses diagnostic [host result]
+    #                      output.  Optional; defaults to false.
+    #   verbose         -- When true, emits an extra [host result] line
+    #                      that echoes the chosen sequence number.
+    #                      Optional; defaults to false.
+    #   readOnly        -- When true, the sequence number file is not
+    #                      written.  Optional; defaults to true.
+    #   fileTypeVarName -- Name of a variable in the caller's frame to
+    #                      receive a short human-readable description of
+    #                      the file: "existing shared", "shared",
+    #                      "existing uniquely", or "uniquely".  Optional;
+    #                      empty means no out-parameter is produced.
+    #   seqNumVarName   -- Name of a variable in the caller's frame to
+    #                      receive the 16-character hex sequence number
+    #                      or the literal "none" in shared mode.
+    #                      Optional; empty means no out-parameter is
+    #                      produced.
+    #
+    # Results:
+    #   The fully normalized path to the commands file.  An empty string
+    #   is returned in the malformed-sequence-file case, which the
+    #   callers treat as "cancel this operation".
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     set directory [eagle_getCmdsDirectory]
@@ -383,6 +693,35 @@ namespace eval :: {
   }
 
   proc eagle_getCmdsDatabaseFileName { fileName {force false} } {
+    # <help>
+    # This procedure returns the file name of the SQLite database that
+    # mirrors the text-file command history.  The database lives next to
+    # the text file by convention: if the text file is "X", the database
+    # is "X.db".  When no text file name is available, the procedure can
+    # optionally fall back to a shared default in the directory returned
+    # by [eagle_getCmdsDirectory].
+    #
+    # How it works: when the supplied file name has non-zero length, the
+    # result is built by appending the ".db" suffix.  When the supplied
+    # file name is empty, the behavior depends on the force flag: if
+    # force is true, a normalized path to "cmds.db" in the commands
+    # directory is returned; otherwise the empty string is returned.
+    # Returning the empty string lets callers (such as
+    # [eagle_searchCommandsFrom]) detect that no database path is
+    # available without raising an error.
+    #
+    # Arguments:
+    #   fileName -- The text-file path whose ".db" sibling is desired,
+    #               or the empty string to request the shared default.
+    #   force    -- When true, forces fallback to the shared default
+    #               "cmds.db" path when fileName is empty.  Optional;
+    #               defaults to false.
+    #
+    # Results:
+    #   A database file path string, or the empty string if no database
+    #   name could be determined.
+    # </help>
+
     if {[string length $fileName] > 0} then {
       return [appendArgs $fileName .db]
     } elseif {$force} then {
@@ -396,6 +735,45 @@ namespace eval :: {
   proc eagle_checkSearchCommandsMode {
           modeVarName noCaseVarName autoWildcardVarName matchAllVarName
           useDatabaseVarName importOnlyVarName quietVarName verboseVarName } {
+    # <help>
+    # This procedure factors mode-modifier sub-flags out of the mode list
+    # in the caller's frame and promotes each of them into a dedicated
+    # boolean variable.  It exists so the search machinery can carry the
+    # mode plus any number of modifier flags as a single list (the way
+    # [eagle_evaluateCommandFrom] builds it from user options) while
+    # individual functions further down the call chain see the modifiers
+    # as separate variables.  It is invoked by [eagle_searchCommandsFrom]
+    # immediately after the option list is normalized.
+    #
+    # How it works: each of the recognized modifier names -- autoWildcard,
+    # noCase, matchAll, useDatabase, importOnly, quiet, and verbose -- is
+    # located in the caller's mode variable using [lsearch -exact -nocase].
+    # If found, the modifier is removed from the mode list with [lreplace],
+    # and the caller's corresponding scalar variable (imported via
+    # [upvar 1]) is set to the literal string true.  Modifiers that are
+    # not present in the mode list leave the corresponding variable
+    # untouched (the caller is expected to have initialized it to false
+    # beforehand).  After this procedure runs, the mode list typically
+    # contains at most a single element naming the actual match mode
+    # ("exact", "glob", "regexp", or empty).
+    #
+    # Arguments:
+    #   modeVarName         -- Name of the caller's mode list variable;
+    #                          modified in place.
+    #   noCaseVarName       -- Name of the caller's noCase scalar.
+    #   autoWildcardVarName -- Name of the caller's autoWildcard scalar.
+    #   matchAllVarName     -- Name of the caller's matchAll scalar.
+    #   useDatabaseVarName  -- Name of the caller's useDatabase scalar.
+    #   importOnlyVarName   -- Name of the caller's importOnly scalar.
+    #   quietVarName        -- Name of the caller's quiet scalar.
+    #   verboseVarName      -- Name of the caller's verbose scalar.
+    #
+    # Results:
+    #   The result of the last [lreplace] or the empty string, which
+    #   callers ignore.  The visible effect is that the caller's mode
+    #   list and modifier scalars are updated in place.
+    # </help>
+
     upvar 1 $modeVarName mode
     upvar 1 $autoWildcardVarName autoWildcard
     upvar 1 $noCaseVarName noCase
@@ -456,6 +834,34 @@ namespace eval :: {
   }
 
   proc eagle_getConnectionString { {readOnly true} } {
+    # <help>
+    # This procedure builds a System.Data.SQLite connection-string
+    # template suitable for passing to [sql open].  The template includes
+    # a literal "$fileName" placeholder that the caller resolves with
+    # [subst] just before opening the database, so this routine itself
+    # never inspects or normalizes a path.  It is used by
+    # [eagle_openDatabase] to obtain a connection string parameterized
+    # for the file at hand.
+    #
+    # How it works: a base "Data Source=$fileName;" fragment is created,
+    # an optional "Read Only=true;" fragment is appended when readOnly
+    # is true, and standard "DateTimeKind=Utc;" and
+    # "DateTimeFormat=UnixEpoch;" fragments are always appended so date
+    # and time values stored in the database use a deterministic, ABI-
+    # stable representation.  The literal dollar-sign reference to
+    # fileName is intentional; the curly braces around the fragment
+    # prevent Tcl from substituting the variable here.
+    #
+    # Arguments:
+    #   readOnly -- When true, the connection string requests read-only
+    #               access.  Optional; defaults to true.
+    #
+    # Results:
+    #   A connection string with the file-name placeholder still
+    #   unresolved.  Callers must resolve it with [subst] (in a scope
+    #   where fileName is defined) before passing it to [sql open].
+    # </help>
+
     set result {Data Source=${fileName};}
 
     if {$readOnly} then {
@@ -469,6 +875,39 @@ namespace eval :: {
   }
 
   proc eagle_getConnectionObject { {varName connection} } {
+    # <help>
+    # This procedure obtains a callable opaque object handle that
+    # represents the underlying System.Data.SQLite connection associated
+    # with a connection identifier previously returned by [sql open].
+    # Having a direct object reference is needed when the script must
+    # call connection methods that the high-level [sql] command does not
+    # expose, such as enabling extensions or loading native interop
+    # extensions; see [eagle_openDatabase] for the only current consumer.
+    #
+    # How it works: the caller's connection variable is imported at
+    # level one via [upvar 1].  If it exists, the procedure reaches into
+    # the active interpreter's internal "connections" dictionary using
+    # NonPublic reflection and asks for the Item indexed by the
+    # connection identifier.  The result is requested as an opaque object
+    # handle with the +NoDispose object-flag (so the script does not own
+    # its lifetime) and -alias so it can be invoked directly.  On error
+    # from the [object invoke] call, the captured failure message is
+    # re-thrown with context describing the connection identifier.  If
+    # the caller's connection variable is missing, an error with the
+    # message "database connection appears to be unavailable" is raised
+    # instead.
+    #
+    # Arguments:
+    #   varName -- Name of a variable in the caller's frame that holds
+    #              a connection identifier returned by [sql open].
+    #              Optional; defaults to "connection".
+    #
+    # Results:
+    #   An opaque object handle representing the underlying connection.
+    #   Errors are raised when the connection variable is missing or the
+    #   reflection lookup fails.
+    # </help>
+
     upvar 1 $varName connection
 
     if {[info exists connection]} then {
@@ -489,6 +928,36 @@ namespace eval :: {
   }
 
   proc eagle_getNativeDirectoryName {} {
+    # <help>
+    # This procedure returns the conventional "OS-architecture" pair
+    # name (for example, "win-x64", "osx-arm64", or "linux-x64") used
+    # by the System.Data.SQLite native runtime layout to locate the
+    # platform-specific interop assembly.  It is a small portability
+    # helper used by code that needs to construct a path under the
+    # "runtimes" subdirectory at runtime.
+    #
+    # How it works: the first part of the name comes from the host
+    # operating system, detected by [isWindows], [isMacOS], or by
+    # examining the tcl_platform(os) element for "Linux".  Anything
+    # else leaves that part empty.  The second part comes from the CPU
+    # architecture in tcl_platform(machine), normalized through
+    # [architectureForPlatform] (from the Eagle.Test package, which is
+    # required on demand).  The two parts are then joined with a hyphen.
+    #
+    # Tricky details: if either part cannot be determined, that part is
+    # the empty string, so the result may end up as "-", "win-", or
+    # "-x64".  This procedure does not exist in the current call graph
+    # for the history machinery but is provided alongside
+    # [eagle_getSQLiteBinaryFileName] for future use and for
+    # interactive callers.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   A hyphen-joined "os-architecture" identifier string.
+    # </help>
+
     if {[isWindows]} then {
       set part1 win
     } elseif {[isMacOS]} then {
@@ -512,6 +981,37 @@ namespace eval :: {
   }
 
   proc eagle_getSQLiteBinaryFileName {} {
+    # <help>
+    # This procedure returns the full path to the SQLite.Interop native
+    # binary that ships alongside the Eagle shell, after verifying that
+    # the binary is trusted.  The path is needed by
+    # [eagle_openDatabase] to load the optional REGEXP extension via
+    # [LoadExtension] when the System.Data.SQLite assembly was compiled
+    # with that capability.
+    #
+    # How it works: the procedure first tries the conventional .NET
+    # runtimes layout, building "runtimes/win-x64/native/SQLite.Interop.dll"
+    # relative to the directory that contains the Eagle shell executable
+    # (as returned by [getShellExecutableName]).  If that file is not
+    # present, it falls back to a flat layout in the same directory as
+    # the shell.  The chosen path is then passed through [file trusted];
+    # if it is not considered trusted, an error is raised so an
+    # untrusted DLL is never loaded.
+    #
+    # Tricky details: the runtimes subdirectory currently hard-codes
+    # the win-x64 RID, mirroring the layout used by official
+    # System.Data.SQLite packages on Windows; non-Windows hosts will
+    # typically fall through to the flat layout.  The trust check is
+    # the only safety gate before [LoadExtension] would load the DLL.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The full path to the SQLite interop assembly.  An error is
+    #   raised when the resolved file is not trusted.
+    # </help>
+
     set fileName [file join [file dirname \
         [getShellExecutableName]] runtimes \
         win-x64 native SQLite.Interop.dll]
@@ -532,6 +1032,40 @@ namespace eval :: {
 
   proc eagle_maybeOpenDatabase {
           fileName {readOnly true} {varName connection} } {
+    # <help>
+    # This procedure conditionally opens the history SQLite database.
+    # When the caller already holds a known-open connection, it does
+    # nothing and reports that fact; otherwise it opens a new
+    # connection via [eagle_openDatabase].  Returning a flag that says
+    # whether the call actually opened the connection lets callers
+    # such as [eagle_addCommandToDatabase] decide whether they own
+    # closing it in their cleanup block.
+    #
+    # How it works: the caller's connection variable (defaulting to
+    # "connection") is imported via [upvar 1].  The procedure checks
+    # whether the [sql] command exposes an "isopen" sub-command (older
+    # interpreters may not) and, if so, whether the variable exists
+    # and the connection is reported open.  All three conditions
+    # together short-circuit to a false return, meaning "did nothing".
+    # Otherwise control falls through to [eagle_openDatabase], whose
+    # boolean return value (it returns true on success) is propagated
+    # back to the caller.
+    #
+    # Arguments:
+    #   fileName -- Path of the database file to open if no open
+    #               connection is already in scope.
+    #   readOnly -- Forwarded to [eagle_openDatabase] when opening.
+    #               Optional; defaults to true.
+    #   varName  -- Name of the caller's connection variable to read
+    #               and possibly assign to.  Optional; defaults to
+    #               "connection".
+    #
+    # Results:
+    #   The literal string false when an existing open connection was
+    #   reused; otherwise the result of [eagle_openDatabase] (true on
+    #   success).  Errors propagate up from the underlying open call.
+    # </help>
+
     upvar 1 $varName connection
 
     if {[lsearch -exact -- [info subcommands sql] isopen] != -1 && \
@@ -543,6 +1077,41 @@ namespace eval :: {
   }
 
   proc eagle_openDatabase { fileName {readOnly true} {varName connection} } {
+    # <help>
+    # This procedure opens a SQLite connection to the history database
+    # file and, if possible, enables the REGEXP extension on it so the
+    # ##! and friends can search with regular expressions.  The
+    # connection identifier is written into a variable in the caller's
+    # frame so it can be referenced (and later closed) by the caller.
+    #
+    # How it works: the connection-string template from
+    # [eagle_getConnectionString] is resolved with [subst] in this
+    # frame (where the fileName local makes the template's $fileName
+    # reference expand correctly) and passed to [sql open -type SQLite].
+    # The resulting identifier is assigned to the caller's connection
+    # variable via [upvar 1].  An object handle for the underlying
+    # connection is then obtained via [eagle_getConnectionObject].  If
+    # the loaded System.Data.SQLite advertises the REGEXP_EXTENSION
+    # interop compile option, extension loading is enabled and the
+    # native sqlite3_regexp_init entry point is loaded from the binary
+    # returned by [eagle_getSQLiteBinaryFileName].  The check is wrapped
+    # so that an absent REGEXP build (such as the assembly in the
+    # externals directory) is simply skipped.
+    #
+    # Arguments:
+    #   fileName -- Path to the SQLite database file.
+    #   readOnly -- When true, the connection is opened read-only.
+    #               Optional; defaults to true.
+    #   varName  -- Name of the variable in the caller's frame that
+    #               receives the new connection identifier.  Optional;
+    #               defaults to "connection".
+    #
+    # Results:
+    #   The literal string true on success.  Errors raised by [sql
+    #   open], [eagle_getConnectionObject], or [eagle_getSQLiteBinaryFileName]
+    #   propagate to the caller.
+    # </help>
+
     upvar 1 $varName connection
 
     set connection [sql open \
@@ -568,6 +1137,29 @@ namespace eval :: {
   }
 
   proc eagle_closeDatabase { {varName connection} } {
+    # <help>
+    # This procedure releases the SQLite connection currently held in a
+    # variable in the caller's frame, performing the reverse of
+    # [eagle_openDatabase].  It is safe to call even when the variable
+    # is not set, which makes it a convenient cleanup step inside [try]
+    # / finally blocks.
+    #
+    # How it works: the caller's connection variable is imported via
+    # [upvar 1].  When present, the variable's value is passed first to
+    # [object dispose] (to release any managed-object resources Eagle
+    # is tracking for the connection) and then to [sql close] (to close
+    # the underlying SQLite handle), and finally the variable itself is
+    # cleared with [unset -nocomplain].  When the variable does not
+    # exist, the procedure is a no-op.
+    #
+    # Arguments:
+    #   varName -- Name of the caller's connection variable.  Optional;
+    #              defaults to "connection".
+    #
+    # Results:
+    #   The empty string.
+    # </help>
+
     upvar 1 $varName connection
 
     if {[info exists connection]} then {
@@ -580,6 +1172,31 @@ namespace eval :: {
   }
 
   proc eagle_clearCommandsInDatabase { fileName } {
+    # <help>
+    # This procedure unconditionally drops the CommandHistory table from
+    # the specified SQLite history database file, deleting every
+    # recorded interactive command in one shot.  It is intended as a
+    # manual maintenance helper for the interactive user (called by
+    # convenience aliases or directly) when the recorded history should
+    # be wiped without removing the database file itself.
+    #
+    # How it works: a writable connection to the database is opened via
+    # [eagle_openDatabase] (which establishes the local "connection"
+    # variable referenced inside the [try] block), and a single
+    # "DROP TABLE IF EXISTS CommandHistory" statement is executed.  The
+    # connection is always closed by [eagle_closeDatabase] in the
+    # finally block, whether the drop succeeded or failed.  The
+    # CommandHistory table will be recreated on demand by
+    # [eagle_addCommandToDatabase] the next time a command is recorded.
+    #
+    # Arguments:
+    #   fileName -- Path to the SQLite history database file.  The file
+    #               itself is not deleted.
+    #
+    # Results:
+    #   The result of [eagle_closeDatabase], which is the empty string.
+    # </help>
+
     try {
       eagle_openDatabase $fileName false
 
@@ -593,6 +1210,50 @@ namespace eval :: {
 
   proc eagle_addCommandToDatabase {
           fileName result startLineIndex stopLineIndex } {
+    # <help>
+    # This procedure inserts a single completed interactive command into
+    # the CommandHistory table of the specified SQLite history database
+    # file, creating the table on demand.  It is used by both the
+    # recording path inside [eagle_interactiveCommandCallback] (which
+    # captures live commands as they are entered) and the bulk-import
+    # path inside [eagle_searchCommandsFrom] (which ingests commands
+    # from a text-file history log).
+    #
+    # How it works: the procedure cooperates with its caller's
+    # "connection" variable by importing it at level one via [upvar 1].
+    # It then calls [eagle_maybeOpenDatabase], which either reuses an
+    # already-open connection or opens a new one; the boolean return is
+    # captured into "opened" so the finally block can close the
+    # connection only if this call actually opened it.  A CREATE TABLE
+    # IF NOT EXISTS statement defines the four-column schema (Sequence,
+    # Lines, StartLine, StopLine) on first use.  The INSERT statement
+    # computes the next sequence number with COALESCE(MAX(Sequence), 0)
+    # plus one and binds the lines text plus the two integer line-index
+    # parameters via positional placeholders.
+    #
+    # Tricky details: when bulk-importing, callers typically wrap many
+    # invocations in an outer SQL transaction (as
+    # [eagle_searchCommandsFrom] does), keeping the connection open for
+    # the entire batch and letting opened remain false in this routine
+    # so the connection is not closed prematurely.  The Sequence column
+    # is computed atomically inside the INSERT and acts as a monotonic
+    # ordering key independent of any database-generated rowid.
+    #
+    # Arguments:
+    #   fileName       -- Path to the SQLite history database file.
+    #   result         -- The full text of the completed command,
+    #                     including any embedded newlines.
+    #   startLineIndex -- Zero-based line index where the command began
+    #                     in the source text (used for traceability;
+    #                     pass zero when not applicable).
+    #   stopLineIndex  -- Zero-based line index where the command
+    #                     ended.
+    #
+    # Results:
+    #   The number of rows affected by the INSERT (normally one) on
+    #   success.  SQLite errors propagate to the caller.
+    # </help>
+
     try {
       upvar 1 connection connection
 
@@ -625,6 +1286,41 @@ namespace eval :: {
   }
 
   proc eagle_getSearchCommandsSql { mode {limit ""} {quiet false} } {
+    # <help>
+    # This procedure builds the SQL SELECT statement used by
+    # [eagle_searchCommandsDatabase] to query the CommandHistory table.
+    # It exists so the three supported match modes (exact, glob, and
+    # regexp) and the optional LIMIT clause are constructed in one
+    # place instead of being woven into the search routine.
+    #
+    # How it works: when the limit argument is a strict positive
+    # integer, a "LIMIT N" fragment is built; otherwise the limit
+    # fragment is the empty string.  A [switch] then chooses the
+    # comparison operator: exact and the empty mode use "Lines = ?",
+    # glob uses "Lines GLOB ?", and regexp uses "Lines REGEXP ?" (which
+    # depends on the REGEXP extension loaded by [eagle_openDatabase]).
+    # Each variant orders results by Sequence descending so the newest
+    # matching commands come first, then interpolates the limit
+    # fragment via [subst -nocommands -nobackslashes] (so only the
+    # limitSql variable is expanded -- no commands or escape sequences
+    # are processed).  Unsupported modes raise an error unless quiet
+    # is true, in which case the empty string is returned and the
+    # caller is expected to treat that as "no results".
+    #
+    # Arguments:
+    #   mode  -- One of "exact", "glob", "regexp", or the empty string
+    #            (treated as exact).
+    #   limit -- A non-negative integer, or the empty string for "no
+    #            limit".  Optional; defaults to the empty string.
+    #   quiet -- When true, suppresses the error for an unsupported
+    #            mode.  Optional; defaults to false.
+    #
+    # Results:
+    #   A parameterized SQL statement string with one bound parameter
+    #   placeholder, or the empty string when the mode is unsupported
+    #   and quiet is true.
+    # </help>
+
     if {[string is integer -strict $limit] && $limit > 0} then {
       set limitSql [appendArgs "LIMIT " $limit]
     } else {
@@ -662,6 +1358,39 @@ namespace eval :: {
   }
 
   proc eagle_maybeAutoWildcard { search mode autoWildcard } {
+    # <help>
+    # This procedure conditionally wraps a search pattern with
+    # mode-appropriate wildcards so a bare term will match anywhere in
+    # a recorded command line.  Concretely, "set" turns into "*set*"
+    # for glob mode and ".*set.*" for regexp mode.  It is shared by
+    # the database search path ([eagle_searchCommandsDatabase]) and the
+    # in-memory match helpers ([eagle_doesLineMatchAny] and
+    # [eagle_doesLineMatchAll]) so both paths interpret the
+    # autoWildcard option identically.
+    #
+    # How it works: when autoWildcard is true and mode is glob, the
+    # search term is wrapped with "*" on both sides; when mode is
+    # regexp, it is wrapped with ".*" on both sides; otherwise the
+    # search term is returned unchanged.  When autoWildcard is false
+    # the search term is always returned unchanged.
+    #
+    # Tricky details: no characters are escaped before wrapping, so a
+    # search term that itself contains glob metacharacters or regexp
+    # metacharacters retains those meanings.  This is intentional --
+    # autoWildcard is meant to convert a bare substring into a
+    # "contains" pattern, not to quote arbitrary text.
+    #
+    # Arguments:
+    #   search       -- The original search term.
+    #   mode         -- One of "glob", "regexp", or any other value
+    #                   (treated as "no wrapping needed").
+    #   autoWildcard -- When true, enables the wrapping; otherwise the
+    #                   search term is returned as-is.
+    #
+    # Results:
+    #   The possibly wrapped search term.
+    # </help>
+
     if {$autoWildcard} then {
       if {$mode eq "glob"} then {
         return [appendArgs * $search *]
@@ -676,6 +1405,55 @@ namespace eval :: {
   proc eagle_searchCommandsDatabase {
           fileName mode autoWildcard noCase searches {limit ""}
           {quiet false} } {
+    # <help>
+    # This procedure queries the SQLite history database for command
+    # lines that match one or more search patterns and returns them
+    # as a flat list.  It is the database-backed implementation that
+    # [eagle_searchCommandsFrom] dispatches to when both useDatabase
+    # is true and importOnly is false; it is also the engine behind
+    # the user-visible #! / #!! / ##! commands when the database
+    # exists.
+    #
+    # How it works: the SQL statement is built once via
+    # [eagle_getSearchCommandsSql] for the requested mode and limit.
+    # If the statement is non-empty, the database is opened with
+    # [eagle_openDatabase] (read-only) and the case_sensitive_like
+    # PRAGMA is set to the inverse of noCase (so noCase=true selects
+    # case-insensitive LIKE/GLOB behavior).  Each search term is
+    # passed through [eagle_maybeAutoWildcard] and used to bind the
+    # single parameter of the statement.  Rows are read sequentially
+    # through a data reader and the Lines column from every row is
+    # appended to the result list.  The data reader is unset between
+    # iterations so its underlying resources are released promptly.
+    # The connection is always closed in the finally block.
+    #
+    # Tricky details: when [eagle_getSearchCommandsSql] returns the
+    # empty string (because the mode was unsupported and quiet was
+    # true), the database is not opened at all and an empty result is
+    # returned.  Results from multiple search terms are concatenated
+    # in the order the terms appear; duplicates and ordering across
+    # terms are the caller's responsibility.
+    #
+    # Arguments:
+    #   fileName     -- Path to the SQLite history database file.
+    #   mode         -- One of "exact", "glob", "regexp", or the empty
+    #                   string.
+    #   autoWildcard -- When true, each search term is wrapped per
+    #                   [eagle_maybeAutoWildcard].
+    #   noCase       -- When true, matching ignores letter case.
+    #   searches     -- A list of search terms; each one runs an
+    #                   independent SELECT.
+    #   limit        -- A non-negative integer (or empty) forwarded to
+    #                   [eagle_getSearchCommandsSql].  Optional;
+    #                   defaults to the empty string.
+    #   quiet        -- When true, suppresses errors from the SQL
+    #                   builder.  Optional; defaults to false.
+    #
+    # Results:
+    #   A list of matching command lines, in the order they were
+    #   produced by the underlying queries.
+    # </help>
+
     try {
       set results [list]
       set sql [eagle_getSearchCommandsSql $mode $limit $quiet]
@@ -709,6 +1487,36 @@ namespace eval :: {
   }
 
   proc eagle_doesLineMatchAny { line searches mode autoWildcard noCase } {
+    # <help>
+    # This procedure tests whether a single command line matches at
+    # least one of the search terms (a logical OR across the search
+    # list).  It is the in-memory match implementation used by
+    # [eagle_searchCommandsFrom] when the database path is not in use,
+    # and provides the semantics of the user-visible #! command.
+    #
+    # How it works: each search term is first wrapped (if requested)
+    # by [eagle_maybeAutoWildcard] and then compared against the line
+    # using the appropriate primitive: [regexp] for regexp mode,
+    # [string match] for glob mode, and [string equal] or eq for
+    # exact and empty modes.  Each primitive is invoked with -nocase
+    # when noCase is true.  The first successful comparison returns
+    # true immediately.  An unrecognized mode silently aborts the loop
+    # (see the BUGBUG comment) and falls through to return false.
+    #
+    # Arguments:
+    #   line         -- The text line being tested.
+    #   searches     -- A list of search terms.  An empty list yields
+    #                   false.
+    #   mode         -- One of "exact", "glob", "regexp", or the empty
+    #                   string.
+    #   autoWildcard -- Forwarded to [eagle_maybeAutoWildcard].
+    #   noCase       -- When true, matching ignores letter case.
+    #
+    # Results:
+    #   The literal string true if any term matched; otherwise the
+    #   literal string false.
+    # </help>
+
     foreach search $searches {
       set search [eagle_maybeAutoWildcard \
           $search $mode $autoWildcard]
@@ -755,6 +1563,43 @@ namespace eval :: {
   }
 
   proc eagle_doesLineMatchAll { line searches mode autoWildcard noCase } {
+    # <help>
+    # This procedure tests whether a single command line matches every
+    # search term in the supplied list (a logical AND across the
+    # search list).  It is the in-memory match implementation used by
+    # [eagle_searchCommandsFrom] when the database path is not in use,
+    # and provides the semantics of the user-visible #!! command.
+    #
+    # How it works: each search term is wrapped (if requested) by
+    # [eagle_maybeAutoWildcard] and tested against the line using the
+    # appropriate primitive: [regexp] for regexp mode, [string match]
+    # for glob mode, and [string equal] or eq for exact and empty
+    # modes.  Each primitive uses -nocase when noCase is true.  The
+    # first failing comparison short-circuits and returns false.  An
+    # unrecognized mode silently aborts the loop (see the BUGBUG
+    # comment) and falls through to the final return.
+    #
+    # Tricky details: if the list of searches is empty the result is
+    # false rather than true.  This is enforced by the final
+    # expression, which requires the searches list to have length
+    # greater than zero.  This deliberate choice means "match all of
+    # nothing" is treated as a non-match, mirroring how the SQL path
+    # behaves when no patterns are supplied.
+    #
+    # Arguments:
+    #   line         -- The text line being tested.
+    #   searches     -- A list of search terms.  An empty list yields
+    #                   false.
+    #   mode         -- One of "exact", "glob", "regexp", or the empty
+    #                   string.
+    #   autoWildcard -- Forwarded to [eagle_maybeAutoWildcard].
+    #   noCase       -- When true, matching ignores letter case.
+    #
+    # Results:
+    #   The literal string true if every term matched; otherwise the
+    #   literal string false.
+    # </help>
+
     foreach search $searches {
       set search [eagle_maybeAutoWildcard \
           $search $mode $autoWildcard]
@@ -801,6 +1646,36 @@ namespace eval :: {
   }
 
   proc eagle_normalizeToLf { data {quiet false} } {
+    # <help>
+    # This procedure converts the line terminators in the specified
+    # text data to the Unix LF convention by collapsing every CRLF
+    # pair into a single LF.  It is used by [eagle_searchCommandsFrom]
+    # before splitting the contents of a text history file into
+    # individual lines, so that downstream code can rely on a single
+    # known terminator.  It is the inverse of [eagle_normalizeToCrLf].
+    #
+    # How it works: a [string map] replaces "\r\n" with "\n" first.
+    # The result is then scanned for any remaining lone CR.  When a
+    # lone CR is found, quiet decides what happens: in quiet mode the
+    # lone CR is also replaced with LF (a more permissive cleanup),
+    # while in non-quiet mode an error is raised that includes the
+    # zero-based index of the first offending CR.
+    #
+    # Tricky details: the order of [string map] arguments matters.
+    # CRLF is collapsed first so that a CRLF pair is not mis-detected
+    # as a stray CR.
+    #
+    # Arguments:
+    #   data  -- The text whose line terminators should be normalized.
+    #   quiet -- When true, lone CRs are silently converted to LFs
+    #            instead of raising an error.  Optional; defaults to
+    #            false.
+    #
+    # Results:
+    #   The normalized text.  An error is raised when a stray CR is
+    #   present and quiet is false.
+    # </help>
+
     set result [string map [list \r\n \n] $data]
 
     if {[set index [string first \r $result]] != -1} then {
@@ -816,6 +1691,35 @@ namespace eval :: {
   }
 
   proc eagle_normalizeToCrLf { data {quiet false} } {
+    # <help>
+    # This procedure converts the line terminators in the specified
+    # text data to the Windows CRLF convention.  It is used by
+    # [eagle_interactiveCommandCallback] just before appending the
+    # recorded interactive commands to the cmds.eagle text file so
+    # that the file follows MS-DOS line-ending conventions and remains
+    # well-formed if later edited on Windows.  It is the inverse of
+    # [eagle_normalizeToLf].
+    #
+    # How it works: the data is scanned for any CR using [string
+    # first].  In strict (non-quiet) mode, finding a CR raises an
+    # error that includes the zero-based index of the first CR.  In
+    # quiet mode (or when no CR was found), the actual conversion
+    # uses [string map]: when at least one stray CR was found, the
+    # map covers both "\n" to "\r\n" and "\r" to "\r\n" so that lone
+    # CR-only line endings are upgraded to CRLF; when no CR was
+    # found, only "\n" to "\r\n" is mapped, which is faster and
+    # produces the same result for purely LF-terminated input.
+    #
+    # Arguments:
+    #   data  -- The text whose line terminators should be normalized.
+    #   quiet -- When true, the presence of a stray CR does not raise
+    #            an error.  Optional; defaults to false.
+    #
+    # Results:
+    #   The text with CRLF line endings.  An error is raised when a
+    #   stray CR is present and quiet is false.
+    # </help>
+
     if {[set index [string first \r $data]] != -1} then {
       if {!$quiet} then {
         error [appendArgs \
@@ -833,6 +1737,30 @@ namespace eval :: {
   }
 
   proc eagle_maximumLengthForAdd {} {
+    # <help>
+    # This procedure returns the maximum allowed length, in characters,
+    # of a single command to be added to the history (either to the
+    # in-memory log, the text file, or the SQLite database).  It is
+    # consulted both by [eagle_interactiveCommandCallback], which
+    # records live commands, and by [eagle_searchCommandsFrom], which
+    # ingests commands from a text-file log.  A value of zero (the
+    # default) means "no limit".
+    #
+    # How it works: the value is resolved in priority order.  First,
+    # the per-interpreter debugger array element MaximumLengthForAdd
+    # is returned if it exists.  Otherwise, if the MaximumLengthForAdd
+    # environment variable is set, its value is returned.  Otherwise,
+    # zero is returned.  This allows the limit to be set permanently
+    # via the environment or temporarily via the debugger array within
+    # a single shell session.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An integer-like string.  Zero means no length cap.
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     if {[info exists debugger(MaximumLengthForAdd)]} then {
@@ -847,6 +1775,28 @@ namespace eval :: {
   }
 
   proc eagle_maximumLengthForSearch {} {
+    # <help>
+    # This procedure returns the maximum allowed length, in characters,
+    # of a single match returned by a history search.  It is consulted
+    # by [eagle_evaluateCommandFrom] to suppress overly long matches
+    # both when returning a single staged command and when joining all
+    # matches for the ##! command.  A value of zero (the default)
+    # means "no limit".
+    #
+    # How it works: the value is resolved in priority order.  First,
+    # the per-interpreter debugger array element
+    # MaximumLengthForSearch is returned if it exists.  Otherwise, if
+    # the MaximumLengthForSearch environment variable is set, its
+    # value is returned.  Otherwise, zero is returned.  This mirrors
+    # the resolution strategy used by [eagle_maximumLengthForAdd].
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   An integer-like string.  Zero means no length cap.
+    # </help>
+
     upvar #0 eagle_debugger debugger
 
     if {[info exists debugger(MaximumLengthForSearch)]} then {
@@ -861,6 +1811,89 @@ namespace eval :: {
   }
 
   proc eagle_searchCommandsFrom { {fileName ""} {mode ""} {limit ""} args } {
+    # <help>
+    # This procedure is the unified back end that searches the
+    # interactive command history, regardless of where the commands
+    # actually live.  It supports three flavors of operation: searching
+    # the SQLite database (when available and requested), searching the
+    # plain-text log on disk combined with the in-memory recording, and
+    # bulk-importing the plain-text log plus in-memory recording into
+    # the SQLite database (when both useDatabase and importOnly are
+    # true).  It is invoked by [eagle_evaluateCommandFrom] to service
+    # every user-visible history command (#!, #!!, #@, #@@, ##!,
+    # and ##0).
+    #
+    # How it works: the optional ".db" sibling of the supplied text
+    # file name is computed via [eagle_getCmdsDatabaseFileName].  The
+    # haveDatabase flag is set when that file exists and is non-empty.
+    # The remaining variadic arguments are taken as the initial search
+    # list, and modifier flags are initialized to false before
+    # [eagle_checkSearchCommandsMode] strips mode-modifier sub-flags
+    # out of the mode list and promotes them.  If a database lookup
+    # is requested (haveDatabase and useDatabase and not importOnly),
+    # the work is delegated to [eagle_searchCommandsDatabase] and its
+    # result is returned directly.  Otherwise an in-memory line list
+    # is built from the text file (read with [readSharedFile] then
+    # normalized by [eagle_normalizeToLf]) and the
+    # interactiveCommands element of the debugger array.  When
+    # importOnly is true, a writable database connection is opened and
+    # a single SQL transaction is begun so that the entire import is
+    # atomic.
+    #
+    # The line list is then scanned.  Blank lines and lines starting
+    # with "#" are skipped.  For each remaining line, when not in
+    # database mode, the match test is delegated to
+    # [eagle_doesLineMatchAll] or [eagle_doesLineMatchAny] depending
+    # on the matchAll flag; in database mode, all lines are
+    # provisionally considered "matching" because the goal is to
+    # import them.  When a line is selected, a secondary inner loop
+    # extends the candidate text one line at a time and tests
+    # [info complete] so that multi-line commands are reassembled
+    # before being recorded or returned.  Incomplete fragments rewind
+    # the line index back to the start so the next iteration retries.
+    # Complete commands are filtered by [eagle_isHistoryCommand] and
+    # the maximum-length guard from [eagle_maximumLengthForAdd]
+    # before being appended to the result list or written to the
+    # database via [eagle_addCommandToDatabase].  During importOnly,
+    # a single "." is emitted to the host per imported command so the
+    # user has progress feedback; after the loop, the transaction is
+    # committed and a trailing newline is emitted.
+    #
+    # Tricky details: the finally block aggressively scrubs every
+    # local variable used inside the body with [unset -nocomplain
+    # -zerostring -purge] so that no stale state lingers in this
+    # procedure's call frame between invocations (the procedure may
+    # be re-entered repeatedly during an interactive session and the
+    # variables hold sensitive command text).  The variadic args list
+    # arrives without name-value parsing -- callers that need option
+    # parsing call [eagle_processSearchArguments] first, before
+    # delegating to this procedure.
+    #
+    # Arguments:
+    #   fileName -- Path to the plain-text command log to read and/or
+    #               import.  Optional; empty disables the text-file
+    #               source.
+    #   mode     -- A list whose first element is "exact", "glob",
+    #               "regexp", or empty, optionally followed by
+    #               modifier sub-flags recognized by
+    #               [eagle_checkSearchCommandsMode] (autoWildcard,
+    #               noCase, matchAll, useDatabase, importOnly, quiet,
+    #               verbose).  Optional; defaults to empty.
+    #   limit    -- A non-negative integer (or empty) capping the
+    #               number of database matches.  Optional; defaults
+    #               to empty.
+    #   args     -- Zero or more search terms.  When useDatabase and
+    #               importOnly are both true, the search terms are
+    #               irrelevant and all eligible lines are imported.
+    #
+    # Results:
+    #   When searching the database, a list of matching command
+    #   lines returned by [eagle_searchCommandsDatabase].  Otherwise,
+    #   a list of matching reassembled commands.  In importOnly mode
+    #   the result is the (potentially empty) list collected from the
+    #   in-memory path, which most callers ignore.
+    # </help>
+
     try {
       upvar #0 eagle_debugger debugger
 
@@ -1016,6 +2049,33 @@ namespace eval :: {
   }
 
   proc eagle_haveStringTransformCallbackBridge {} {
+    # <help>
+    # This procedure tests whether the optional
+    # StringTransformCallbackBridge support class is available in the
+    # running interpreter, which is required to safely route the
+    # interactive command callback across AppDomain boundaries.  It
+    # is consulted by [eagle_enableInteractiveCommandCallback] so it
+    # can decide whether to wire up the callback directly or through
+    # the bridge.
+    #
+    # How it works: three conditions must all hold for a true result.
+    # First, the Eagle.Test package must successfully load (it
+    # supplies test infrastructure that the bridge currently lives
+    # in).  Second, the running Eagle must be a stable release at or
+    # above the threshold checked by [isStableEagleRelease] (50,
+    # strict).  Third, all three of the TEST, ISOLATED_INTERPRETERS,
+    # and ISOLATED_PLUGINS compile options must be present in the
+    # eagle_platform(compileOptions) list.  Failing any check
+    # short-circuits to false.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The literal string true when the bridge is available;
+    #   otherwise the literal string false.
+    # </help>
+
     if {[catch {package require Eagle.Test}]} then {
       return false
     }
@@ -1036,6 +2096,42 @@ namespace eval :: {
   }
 
   proc eagle_useStringTransformCallbackBridge {} {
+    # <help>
+    # This procedure installs the interactive command callback through
+    # the StringTransformCallbackBridge so that the callback delegate
+    # remains usable when the interactive loop was entered from a
+    # different AppDomain than the one that owns the script.  It is
+    # the path chosen by [eagle_enableInteractiveCommandCallback] when
+    # [eagle_haveStringTransformCallbackBridge] reports true.
+    #
+    # How it works: a managed callback object is created for the
+    # script procedure [eagle_interactiveCommandCallback] using the
+    # bridge's expected ScriptStringTransformCallback marshaller type;
+    # the object is created with +NoDispose so its lifetime is not
+    # tied to a local scope, and +DynamicCallback so it accepts
+    # dynamic invocation.  That object is passed to
+    # StringTransformCallbackBridge.Create, whose returned bridge
+    # object is converted into a Delegates.StringTransformCallback
+    # delegate via Delegate.CreateDelegate.  The delegate is then
+    # assigned to the active interpreter's
+    # InteractiveCommandCallback property.  If the bridge factory
+    # produces a null object handle, the error message stored in its
+    # out-parameter is converted to a Tcl error.
+    #
+    # Tricky details: the bridge type is referred to by its
+    # unqualified name (with an ECP comment marker) because it lives
+    # in the loaded test plugin's namespace.  The marshalling type
+    # and delegate type are hard-coded to their internal names.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   The empty string.  The visible effect is that the active
+    #   interpreter's InteractiveCommandCallback now routes through
+    #   the bridge.
+    # </help>
+
     #
     # HACK: If the interactive loop was entered from another AppDomain,
     #       this should use the StringTransformCallbackBridge class to
@@ -1070,6 +2166,41 @@ namespace eval :: {
   }
 
   proc eagle_enableInteractiveCommandCallback { enable {quiet false} } {
+    # <help>
+    # This procedure sets or unsets the interactive command callback
+    # delegate on the active interpreter so that
+    # [eagle_interactiveCommandCallback] is invoked for every command
+    # entered at the interactive loop.  It is the wiring step shared
+    # by the recording-enable and recording-disable paths in the
+    # #record procedure.
+    #
+    # How it works: when enable is true, the procedure prefers the
+    # AppDomain-safe path through [eagle_useStringTransformCallbackBridge]
+    # if the bridge is available (and not suppressed by the global
+    # "no(NoStringTransformCallbackBridge)" flag or the environment
+    # variable of the same name).  Otherwise it installs the
+    # [eagle_interactiveCommandCallback] procedure directly as the
+    # callback via [object invoke] with +DynamicCallback marshalling.
+    # In either case, the callback flags are set to
+    # "-Complain AddReference +ThrowOnError" so the object machinery
+    # reports problems loudly and adds a reference to the underlying
+    # object.  When enable is false, the procedure clears the
+    # callback by setting InteractiveCommandCallback to null.  In
+    # both branches, unless quiet is true, a status line is emitted
+    # via [host result] Continue describing what just happened.
+    #
+    # Arguments:
+    #   enable -- A boolean.  True installs the callback; false
+    #             removes it.
+    #   quiet  -- When true, suppresses the status message.
+    #             Optional; defaults to false.
+    #
+    # Results:
+    #   The result of the final [host result] call (typically the
+    #   empty string).  The visible effect is the change in callback
+    #   registration.
+    # </help>
+
     #
     # NOTE: Set or unset the interactive command callback (delegate)
     #       for the current interpreter, based on the "enable" flag.
@@ -1382,6 +2513,46 @@ namespace eval :: {
 
     if {$enable} then {
       proc eagle_yesOrNoOrCancel { text caption default } {
+        # <help>
+        # This procedure presents the interactive user with a yes / no
+        # / cancel question and returns the chosen answer as one of
+        # the strings "Yes", "No", or "Cancel".  It is defined inside
+        # the recording-enable branch of #record so it is only
+        # available when interactive command recording is turned on.
+        # The save-on-exit logic in [eagle_interactiveCommandCallback]
+        # uses it (via [eagle_maybeYesOrNoOrCancel]) to ask whether
+        # the captured commands should be appended to the commands
+        # file.
+        #
+        # How it works: when running on Windows with the WINFORMS
+        # compile option enabled, the question is delegated to the
+        # internal FormOps.YesOrNoOrCancel helper, which displays a
+        # standard message box and translates the System.Windows.Forms.DialogResult
+        # into the Yes / No / Cancel triple.  On every other host or
+        # when WINFORMS is unavailable, a text prompt is shown
+        # instead: the caller's caption is temporarily installed as
+        # the host title (and restored in finally), the text is
+        # printed with [host result] Return, the y/n/c hint line is
+        # printed with [host result] Break, and a single line is read
+        # from stdin via [gets].  The reply is matched against
+        # case-insensitive prefixes (Y(es)?, N(o)?, C(an(cel)?)?) to
+        # produce the canonical answer, and a "Defaulted" or
+        # "Entered" status line is echoed before returning.  The
+        # default-letter is shown uppercase in the hint to indicate
+        # which answer is the default.
+        #
+        # Arguments:
+        #   text    -- The question text to display.
+        #   caption -- The window title or host title to set; empty
+        #              means leave the existing title alone.
+        #   default -- The fallback answer ("Yes", "No", or "Cancel")
+        #              used when the user just presses enter or input
+        #              cannot be read.
+        #
+        # Results:
+        #   One of the strings "Yes", "No", or "Cancel".
+        # </help>
+
         if {[isWindows] && [lsearch -exact -- \
             $::eagle_platform(compileOptions) WINFORMS] != -1} then {
           set result [object invoke -flags +NonPublic -parametertypes \
@@ -1436,6 +2607,47 @@ namespace eval :: {
 
       proc eagle_maybeYesOrNoOrCancel {
               yesVarName noVarName cancelVarName text caption default } {
+        # <help>
+        # This procedure decides whether to prompt the user with a
+        # yes / no / cancel question or to return a pre-configured
+        # answer based on environment variables or per-interpreter
+        # debugger flags.  It is the auto-answer wrapper around
+        # [eagle_yesOrNoOrCancel] and is the function actually called
+        # by [eagle_interactiveCommandCallback] when deciding what to
+        # do with unsaved commands as the user exits.
+        #
+        # How it works: for each of "Yes", "No", and "Cancel", the
+        # procedure looks for an environment variable of the
+        # corresponding name (yesVarName, noVarName, cancelVarName);
+        # if the variable exists and is truthy, that answer is
+        # returned immediately, allowing the prompt to be skipped
+        # entirely for scripted or non-interactive sessions.  If no
+        # environment variable forces an answer, the same three names
+        # are checked in the eagle_debugger array (a session-scoped
+        # alternative).  When none of the overrides fires, control
+        # falls through to [eagle_yesOrNoOrCancel] with the supplied
+        # text, caption, and default.
+        #
+        # Tricky details: the order of checks is Yes-env, Yes-debug,
+        # No-env, No-debug, Cancel-env, Cancel-debug.  Once an
+        # override matches, no further variables are consulted.
+        #
+        # Arguments:
+        #   yesVarName    -- Name of the environment variable and
+        #                    debugger array element that forces a
+        #                    "Yes" answer when truthy.
+        #   noVarName     -- Same for "No".
+        #   cancelVarName -- Same for "Cancel".
+        #   text          -- Question text passed through to the
+        #                    underlying prompt when no override
+        #                    applies.
+        #   caption       -- Window or host title passed through.
+        #   default       -- Default answer passed through.
+        #
+        # Results:
+        #   One of the strings "Yes", "No", or "Cancel".
+        # </help>
+
         upvar #0 eagle_debugger debugger
 
         if {[info exists ::env($yesVarName)] && \
@@ -1472,6 +2684,88 @@ namespace eval :: {
       }
 
       proc eagle_interactiveCommandCallback { text } {
+        # <help>
+        # This procedure is the interpreter callback that is invoked
+        # for every interactive command line as it arrives, before
+        # the command is evaluated.  It performs three jobs: it
+        # records the command text into both the in-memory log and
+        # the SQLite history database, it intercepts the "exit" and
+        # "#exit" commands to prompt the user about unsaved
+        # recordings, and it returns the (possibly empty) text that
+        # the interactive loop should actually evaluate.  It is the
+        # heart of the recording machinery installed by #record.
+        #
+        # How it works: the procedure first declines to do anything
+        # in safe interpreters, when [scope global] has been changed,
+        # or when the null object handle is unavailable -- in those
+        # cases it simply returns the original text.  It then aliases
+        # the eagle_debugger array (using the "interactiveCommands"
+        # element as the in-memory log) and handles a subtle opaque
+        # object handle bugfix: if the text argument carries an
+        # opaque object handle with reference count zero, a
+        # temporary reference is added and the +Locked flag is set
+        # so that passing it through string-returning helpers does
+        # not cause premature removal from the interpreter; the
+        # opaque handle is then converted to its underlying string
+        # via [getStringFromObjectHandle] and the lock and reference
+        # are released in finally.  After normalization, the trimmed
+        # text length is checked; an empty line skips all recording.
+        #
+        # The fully qualified commands file name is computed up
+        # front (so the prompt can show it), then the procedure
+        # branches: if the trimmed text is "exit" or "#exit" and the
+        # interpreter is not kiosk-locked, the recorded-commands
+        # count is checked.  When there are unsaved commands, the
+        # user is prompted by [eagle_maybeYesOrNoOrCancel].  A "Yes"
+        # answer joins all recorded commands (with a header that
+        # encodes the timestamp, context, and sequence number) and
+        # appends them to the file via [appendSharedFile] after
+        # normalization to CRLF, then clears the in-memory log and
+        # reports an Ok status.  A "No" answer simply clears the
+        # in-memory log.  A "Cancel" answer returns the empty
+        # string, which the interactive loop interprets as "do not
+        # evaluate this command", allowing the user to back out of
+        # exiting.
+        #
+        # When the text is not an exit, the procedure honors several
+        # guards before recording: it skips lines that
+        # [eagle_isHistoryCommand] identifies as history-management
+        # commands (so the management commands themselves do not
+        # pollute the history), it enforces [eagle_maximumLengthForAdd]
+        # if set, and it skips lines that look like history
+        # manipulation commands matching the regexp
+        # ^\\?#1or2[!@_]1or2 followed by whitespace.  Surviving
+        # commands are appended to the in-memory log unless
+        # NoAddCommandToTextFile is set, and inserted into the
+        # SQLite database via [eagle_addCommandToDatabase] (inside a
+        # [catch] guard, with the database transiently opened and
+        # closed) unless NoAddCommandToDatabaseFile is set.  In all
+        # cases (except the explicit cancel branch) the original
+        # text argument is returned verbatim so the interactive loop
+        # evaluates exactly what the user typed.
+        #
+        # Tricky details: the reference-counting dance around opaque
+        # object handles is explained in detail in the long comment
+        # inside the procedure body; the short version is that
+        # reference counting and call-frame cleanup are not coupled,
+        # so the temporary AddReference and +Locked flag are
+        # necessary to ensure the underlying object survives the
+        # string conversion.  The procedure is intentionally a
+        # global-namespace proc rather than a per-interpreter
+        # closure so the [object invoke] machinery can find it by
+        # name.
+        #
+        # Arguments:
+        #   text -- The raw command text entered at the prompt.  May
+        #           be an opaque object handle that carries the
+        #           string indirectly.
+        #
+        # Results:
+        #   The text that the interactive loop should evaluate.
+        #   This is normally the original text argument; the empty
+        #   string is returned only when the user cancels an exit.
+        # </help>
+
         #
         # NOTE: This callback procedure is not designed to be used in "safe"
         #       interpreters.

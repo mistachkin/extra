@@ -38,6 +38,42 @@ namespace eval ::Eagle {
   #   * duplicate object member names.
   #
   proc jsonSelfTest {} {
+    # <help>
+    # This procedure runs a small built-in regression test of the JSON parser
+    # by comparing its output against canonical "legacy" dictionary
+    # representations that ship next to this script.  It exists so that the
+    # package can be smoke-tested without pulling in the full Eagle test
+    # harness -- useful right after the package is loaded, or as a quick
+    # sanity check during development of the parser.
+    #
+    # How it works: it locates the script's source file via info source on
+    # the current call frame, then walks a fixed list of data file basenames
+    # (currently "example" and "example.strict").  For each basename it loads
+    # the expected output from a sibling ".dict" file (read as UTF-8 binary
+    # so byte content matches exactly) and the input from the corresponding
+    # ".json" file, runs [jsonToValue] on the JSON, and compares.  The first
+    # mismatch causes an immediate false return; if every pair matches, true
+    # is returned.
+    #
+    # Tricky details: the expected outputs are stored as flat
+    # legacy-dictionary text rather than the new node representation, yet
+    # [jsonToValue] returns the node representation -- in the current codebase
+    # that means this self-test only passes if the two formats happen to
+    # match for the chosen sample inputs.  Callers should treat a true
+    # result as "no regression against the bundled samples", not as proof
+    # that the parser is correct for arbitrary input.  The procedure assumes
+    # the "data" subdirectory exists alongside this script; if it does not,
+    # the underlying file open will raise an error rather than returning
+    # false.
+    #
+    # Arguments:
+    #   None.
+    #
+    # Results:
+    #   true if every sample's parsed output matches its stored expected
+    #   value, false on the first mismatch.
+    # </help>
+
     set path [file dirname \
         [info source [lindex [info level [info level]] 0]]]
 
@@ -60,10 +96,74 @@ namespace eval ::Eagle {
   }
 
   proc jsonToDictionary { json } {
+    # <help>
+    # This procedure parses a JSON document and returns it in the legacy
+    # "flat" representation: nested Tcl-style dictionaries for objects, plain
+    # lists for arrays, and bare scalar values for strings, numbers,
+    # booleans, and null.  It exists as a convenience wrapper for callers
+    # that want the simplest, most idiomatic value form and do not care
+    # about distinguishing types (for example, a JSON number from a JSON
+    # string containing digits) or about preserving object member order or
+    # duplicate keys.
+    #
+    # How it works: it delegates parsing to [jsonToValue] (which returns the
+    # type-tagged node tree used internally by this package) and then runs
+    # [jsonNodeToLegacy] to collapse those nodes into the legacy form.
+    #
+    # Tricky details: information is intentionally lost relative to
+    # [jsonToValue].  Object versus array can still be inferred from the
+    # context but strings, numbers, booleans, and null all become bare
+    # values that look alike textually.  Duplicate object keys collapse to
+    # the last occurrence because dict create / dict set are used to build
+    # the result.  Use [jsonToValue] if any of those distinctions matter.
+    #
+    # Arguments:
+    #   json -- The JSON document to parse, as a string.
+    #
+    # Results:
+    #   The parsed value in the legacy representation described above.
+    #   Errors raised by the parser propagate unchanged.
+    # </help>
+
     return [jsonNodeToLegacy [jsonToValue $json]]
   }
 
   proc jsonToValue { json } {
+    # <help>
+    # This procedure is the top-level entry point of the JSON parser.  It
+    # consumes a complete JSON document and returns the parsed value in the
+    # type-tagged "node" representation used internally by this package -- a
+    # two-element list whose first element is one of "object", "array",
+    # "string", "number", "boolean", or "null", and whose second element is
+    # the corresponding value (see the comment block at the top of the
+    # source file for the exact shapes).  It exists so that callers who care
+    # about type information, object member order, or duplicate object keys
+    # can recover all of that from the result.
+    #
+    # How it works: it initializes a parse cursor (an integer index) at
+    # zero, hands the document and the cursor to [jsonParseValue] (which does
+    # all the real work and advances the cursor), then skips any trailing
+    # whitespace and verifies that the cursor has reached the end of input.
+    # Anything left over is reported as an "unexpected trailing characters"
+    # error so that two values smashed together (or stray text after the
+    # value) do not silently parse as just the first one.
+    #
+    # Tricky details: the parser is strict about end-of-input -- valid
+    # whitespace after the value is allowed and ignored, but any other
+    # trailing content is an error.  All errors raised by the recursive
+    # descent are propagated unchanged.  The "index" variable is local to
+    # this procedure; [jsonParseValue] receives its name and uses upvar so
+    # that the cursor can be advanced without returning it explicitly.
+    #
+    # Arguments:
+    #   json -- The complete JSON document to parse, as a string.  The
+    #           empty string is not a valid JSON document and will produce
+    #           an "unexpected end of JSON input" error.
+    #
+    # Results:
+    #   The parsed value as a two-element type-tagged node.
+    # </help>
+
     set index 0
     set result [jsonParseValue $json index]
 
@@ -79,18 +179,113 @@ namespace eval ::Eagle {
   }
 
   proc jsonNode { type value } {
+    # <help>
+    # This procedure is the constructor for the type-tagged node
+    # representation used throughout the JSON package.  Given a type tag and
+    # a value, it returns the two-element list that the rest of the package
+    # treats as a single JSON node.  It exists so that the node format lives
+    # in exactly one place; if the representation ever changes, only this
+    # procedure (and its companion accessors [jsonType] and [jsonValue]) needs
+    # to change.
+    #
+    # How it works: it forwards both arguments to a single list call, which
+    # ensures that arbitrary whitespace or special characters in either
+    # argument are properly quoted as separate list elements.
+    #
+    # Arguments:
+    #   type  -- The type tag, expected to be one of "object", "array",
+    #            "string", "number", "boolean", or "null".  This procedure
+    #            does not validate that constraint -- callers are trusted to
+    #            supply a valid tag.
+    #   value -- The associated value, in whatever shape the type implies
+    #            (see the comment block at the top of the source file).
+    #
+    # Results:
+    #   The newly constructed node.
+    # </help>
+
     return [list $type $value]
   }
 
   proc jsonType { node } {
+    # <help>
+    # This procedure is the accessor that returns the type tag of a
+    # JSON node previously built by [jsonNode] (or returned by the parser).
+    # It exists so that the layout of the node representation is hidden
+    # behind a named operation and consumers never need to know that the
+    # tag is stored at list index zero.
+    #
+    # How it works: it returns the first element of the node using lindex.
+    # It performs no validation and assumes the input is a well-formed node.
+    #
+    # Arguments:
+    #   node -- A two-element JSON node of the form produced by jsonNode.
+    #
+    # Results:
+    #   The type tag, one of "object", "array", "string", "number",
+    #   "boolean", or "null".
+    # </help>
+
     return [lindex $node 0]
   }
 
   proc jsonValue { node } {
+    # <help>
+    # This procedure is the accessor that returns the value portion of a
+    # JSON node previously built by [jsonNode] (or returned by the parser).
+    # It is the companion of [jsonType] and exists for the same reason: to
+    # hide the underlying list layout behind a named operation.
+    #
+    # How it works: it returns the second element of the node using lindex.
+    # It performs no validation and assumes the input is a well-formed node.
+    #
+    # Arguments:
+    #   node -- A two-element JSON node of the form produced by jsonNode.
+    #
+    # Results:
+    #   The value associated with the node.  The shape of the value depends
+    #   on the type tag (see the comment block at the top of the source
+    #   file for the exact mapping).
+    # </help>
+
     return [lindex $node 1]
   }
 
   proc jsonNodeToLegacy { node } {
+    # <help>
+    # This procedure converts a type-tagged JSON node (as produced by the
+    # parser) into the older "flat" representation: nested Tcl dictionaries
+    # for objects, plain lists for arrays, and bare scalar values for
+    # everything else.  It exists so that callers and tooling written against
+    # the legacy format can interoperate with the new type-preserving parser
+    # without being rewritten.
+    #
+    # How it works: it inspects the node's type tag and dispatches on it.
+    # For an object, it builds a dict by walking the alternating
+    # key-and-child-node pairs and recursing on each child.  For an array, it
+    # builds a list by recursing on each element.  For string, number,
+    # boolean, and null the value is returned verbatim because those scalar
+    # forms are already directly usable.  Any unrecognized tag raises an
+    # "invalid JSON node type" error.
+    #
+    # Tricky details: information loss is unavoidable when collapsing the
+    # tagged form -- the same legacy value can come from different JSON
+    # shapes (e.g. the string "42" and the number 42 both become the bare
+    # string "42").  For objects, dict semantics mean that if duplicate keys
+    # are present, only the value from the last occurrence survives; the
+    # tagged form preserves them all.  The recursion runs once per node and
+    # is unbounded; very deeply nested input could overflow the script call
+    # stack.
+    #
+    # Arguments:
+    #   node -- A type-tagged JSON node, typically obtained from jsonToValue
+    #           or constructed via jsonNode.
+    #
+    # Results:
+    #   The legacy-form value: a dict for object, a list for array, or the
+    #   scalar value for string, number, boolean, and null.
+    # </help>
+
     set type [jsonType $node]
     set value [jsonValue $node]
 
@@ -126,6 +321,36 @@ namespace eval ::Eagle {
   }
 
   proc jsonSkipWhitespace { json indexVarName } {
+    # <help>
+    # This procedure advances the parser's cursor past any run of JSON
+    # whitespace characters at the current position.  It is shared by every
+    # part of the parser that needs to tolerate optional whitespace between
+    # syntactic tokens (between an object key and its colon, between array
+    # elements, around the top-level value, and so on), so the same notion
+    # of "whitespace" is enforced consistently everywhere.
+    #
+    # How it works: it accesses the caller's cursor variable via upvar and
+    # then loops, peeking at the character at the current index.  As long as
+    # that character is a tab, newline, carriage return, or space, the
+    # cursor is incremented.  The loop also stops at end of input.
+    #
+    # Tricky details: only the four characters mandated by the JSON
+    # specification count as whitespace -- form feed, vertical tab, and
+    # Unicode whitespace such as U+00A0 are NOT skipped and will be left
+    # for the next parsing step to reject.  The procedure modifies the
+    # caller's cursor variable in place and returns no meaningful value;
+    # callers ignore its result.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable to advance.
+    #
+    # Results:
+    #   None meaningful; the cursor variable in the caller's frame is
+    #   updated as a side effect.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set length [string length $json]
@@ -142,6 +367,50 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseValue { json indexVarName {depth 0} } {
+    # <help>
+    # This procedure parses a single JSON value -- string, array, object,
+    # boolean, null, or number -- starting at the caller's current cursor
+    # position.  It is the central dispatch point of the recursive-descent
+    # parser: [jsonToValue] calls it once for the top-level value, and the
+    # container parsers call it recursively for each member or element.
+    #
+    # How it works: it skips leading whitespace, peeks at the first
+    # character, and dispatches to the appropriate specialist parser based
+    # on that character -- a double quote starts a string, a left square
+    # bracket starts an array, a left curly bracket (described in words
+    # because the literal character cannot appear in this help text) starts
+    # an object, "t" or "f" starts a boolean, "n" starts null, and a plus
+    # sign, minus sign, or ASCII digit starts a number.  The specialist
+    # parsers advance the cursor; this procedure wraps their results in the
+    # appropriate type-tagged node.  Anything else is an unexpected
+    # character at the current index.
+    #
+    # Tricky details: a maximum nesting depth is enforced via the namespace
+    # variable jsonMaximumDepth.  When that variable is set and the current
+    # call's depth exceeds it, an error is raised before any character is
+    # consumed.  This protects against pathological deeply nested input.
+    # Unexpected end of input (cursor past the document length after
+    # skipping whitespace) is reported as "unexpected end of JSON input".
+    # The arrays for arrays and the objects for objects recurse with depth
+    # plus one, but the number, string, boolean, and null parsers do not
+    # increment depth because they cannot themselves contain values.  Plus
+    # signs and unary leading plus on numbers are accepted here even though
+    # strict JSON does not allow them; [jsonParseNumber] will accept and
+    # consume the plus.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable to consume from and advance.
+    #   depth        -- The current recursion depth.  Defaults to zero for
+    #                   the top-level call; container parsers pass their
+    #                   own depth plus one.
+    #
+    # Results:
+    #   A type-tagged JSON node representing the parsed value.  Errors are
+    #   raised on malformed input.
+    # </help>
+
     variable jsonMaximumDepth
 
     upvar 1 $indexVarName index
@@ -192,6 +461,45 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseObject { json indexVarName depth } {
+    # <help>
+    # This procedure parses a JSON object starting at the caller's current
+    # cursor position, which must be sitting on an opening curly bracket.
+    # It returns a node whose value is a flat list of alternating key and
+    # child-node entries -- this preserves both the original member order
+    # and any duplicate keys, which a dict cannot.
+    #
+    # How it works: it consumes the opening curly bracket, skips
+    # whitespace, and immediately checks for an empty object (closing
+    # curly bracket).  Otherwise it loops, reading a string key, expecting
+    # a colon, and recursively parsing the member's value via
+    # [jsonParseValue] (passing depth plus one so the global depth limit
+    # applies to the nested call).  After each member it looks for a comma
+    # (continue) or closing curly bracket (done); anything else is an
+    # error.  Whitespace is tolerated between every token.
+    #
+    # Tricky details: keys must be JSON strings -- not bare identifiers --
+    # so anything other than a double quote at the key position is
+    # reported as "expected string key".  Trailing commas are not
+    # accepted: after a comma the loop falls into the next iteration and
+    # demands another string key.  Duplicate keys are preserved verbatim
+    # in the result; downstream consumers decide what to do with them.
+    # The procedure advances the caller's cursor past the closing curly
+    # bracket on success.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   opening curly bracket.
+    #   depth        -- The current recursion depth.  Member values are
+    #                   parsed at depth plus one.
+    #
+    # Results:
+    #   A type-tagged node with type "object" whose value is the list of
+    #   alternating keys and member nodes.  Errors are raised on
+    #   malformed input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set result [list]
@@ -239,6 +547,38 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseArray { json indexVarName depth } {
+    # <help>
+    # This procedure parses a JSON array starting at the caller's current
+    # cursor position, which must be sitting on an opening square bracket.
+    # It returns a node whose value is the ordered list of element nodes.
+    #
+    # How it works: it consumes the opening square bracket, skips
+    # whitespace, and immediately checks for an empty array (closing
+    # square bracket).  Otherwise it loops, recursively parsing one
+    # element via [jsonParseValue] (passing depth plus one so the depth
+    # limit applies), then looks for a comma (continue) or closing square
+    # bracket (done); anything else is an error.  Whitespace is tolerated
+    # between every token.
+    #
+    # Tricky details: trailing commas are not accepted -- after a comma
+    # the loop falls into the next iteration and demands another value.
+    # Element order is preserved exactly as in the input.  The procedure
+    # advances the caller's cursor past the closing square bracket on
+    # success.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   opening square bracket.
+    #   depth        -- The current recursion depth.  Element values are
+    #                   parsed at depth plus one.
+    #
+    # Results:
+    #   A type-tagged node with type "array" whose value is the list of
+    #   element nodes.  Errors are raised on malformed input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set result [list]
@@ -272,6 +612,42 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseHexadecimalQuad { json indexVarName } {
+    # <help>
+    # This procedure reads exactly four consecutive ASCII hexadecimal
+    # digits from the input and returns their integer value.  It is the
+    # building block for parsing the four-hex-digit body of a JSON Unicode
+    # escape (the part after the backslash and "u"), and it is called
+    # once for a basic-multilingual-plane escape and twice for a
+    # surrogate pair.
+    #
+    # How it works: it computes the index of the last expected digit
+    # (current index plus three), confirms that there are enough
+    # characters remaining, extracts the four-character slice, validates
+    # that every character is a hexadecimal digit using string is xdigit,
+    # then converts the slice to an integer by prepending the "0x" prefix
+    # and forcing an integer expression.  The cursor is advanced by four
+    # positions on success.
+    #
+    # Tricky details: validation is performed before the cursor is
+    # advanced, so on failure the cursor is left at the start of the
+    # malformed escape.  Both incomplete escapes (fewer than four
+    # remaining characters) and invalid escapes (any non-hex character in
+    # the four positions) are reported with distinct messages, and both
+    # use the entry index in the message so users can locate the problem.
+    # The result is always a non-negative integer in the range zero
+    # through 0xFFFF.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   first of the four hex digits.
+    #
+    # Results:
+    #   The integer value of the four hex digits.  Errors are raised on
+    #   incomplete or invalid input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set length [string length $json]
@@ -291,6 +667,51 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseUnicodeEscape { json indexVarName } {
+    # <help>
+    # This procedure consumes a JSON Unicode escape and returns the
+    # corresponding decoded character (or surrogate pair).  It is called
+    # by [jsonParseString] immediately after it has consumed the backslash
+    # and the "u" of a \\uXXXX escape; the cursor must therefore be
+    # pointing at the first hex digit on entry.
+    #
+    # How it works: it parses the first four hex digits via
+    # [jsonParseHexadecimalQuad].  If the result lies in the UTF-16 high
+    # surrogate range 0xD800 through 0xDBFF, it speculatively looks for a
+    # following \\u escape with a matching low surrogate (0xDC00 through
+    # 0xDFFF) and, if found, returns both code units formatted with
+    # format %c%c so that the engine can compose them into a single
+    # supplementary-plane character.  If the low surrogate is missing or
+    # out of range, the cursor is restored so the lone high surrogate is
+    # returned by itself.  Lone low surrogates are likewise returned
+    # by themselves.  When the namespace variable jsonStrictUnicode is
+    # set to a true value, both "unpaired high surrogate" and "unpaired
+    # low surrogate" cases instead raise an error referencing the start
+    # of the offending escape.
+    #
+    # Tricky details: this is the only place where the parser optionally
+    # raises an error driven by a configuration variable rather than by
+    # the document content.  The cursor is restored on the surrogate
+    # rollback path (savedIndex), so a partial mismatch does not leave
+    # the parser in a confused state.  The startIndex captured at entry
+    # is the index of the first hex digit of the first escape, which is
+    # what the strict error messages report.  Returning lone surrogates
+    # as single-character strings is intentional even though the result
+    # is not strictly valid Unicode -- the parser preserves whatever the
+    # input contained.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   first hex digit of the escape body.
+    #
+    # Results:
+    #   The decoded string, normally one character long (two for a
+    #   correctly paired surrogate pair).  Errors are raised on
+    #   incomplete or invalid hex digits, or on unpaired surrogates
+    #   when strict Unicode handling is enabled.
+    # </help>
+
     variable jsonStrictUnicode
 
     upvar 1 $indexVarName index
@@ -331,6 +752,50 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseString { json indexVarName } {
+    # <help>
+    # This procedure parses a JSON string literal starting at the caller's
+    # current cursor position, which must be sitting on the opening double
+    # quote, and returns the decoded value.  It is shared between the
+    # value parser (for JSON string values) and the object parser (for
+    # member keys).
+    #
+    # How it works: it remembers the start index for error reporting,
+    # consumes the opening double quote, and loops over the input.  A
+    # closing double quote ends the string and returns the accumulated
+    # result.  A backslash starts an escape sequence: it advances past
+    # the backslash and switches on the next character to append the
+    # corresponding control character (b, t, n, v, f, r, double quote,
+    # forward slash, or backslash itself).  A "u" escape delegates to
+    # [jsonParseUnicodeEscape], which both reads the four hex digits and
+    # appends the decoded character; the surrounding loop therefore uses
+    # continue rather than the trailing incr that handles the simpler
+    # escapes.  Any other character is appended verbatim, except that
+    # characters with code points below 0x20 are rejected as unescaped
+    # control characters (which the JSON specification forbids inside
+    # string literals).
+    #
+    # Tricky details: forward slash is recognized as an escape (\\/ is
+    # legal in JSON) but it is also a perfectly valid bare character, so
+    # both forms produce the same output.  The vertical tab escape (\\v)
+    # is accepted even though strict JSON does not list it.  An
+    # unterminated string -- end of input reached before a closing
+    # double quote -- raises an "unterminated string" error referencing
+    # the opening quote, not the current position, which makes it easier
+    # to locate.  Any unknown backslash sequence raises an "unknown
+    # escape sequence" error at the position of the offending character.
+    # The cursor is advanced past the closing double quote on success.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   opening double quote.
+    #
+    # Results:
+    #   The decoded string value (without the surrounding quotes).
+    #   Errors are raised on malformed input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set startIndex $index
@@ -390,6 +855,46 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseNumber { json indexVarName } {
+    # <help>
+    # This procedure parses a JSON number literal starting at the
+    # caller's current cursor position and returns the original lexeme
+    # (the exact substring that made up the number).  Returning the raw
+    # text rather than a parsed numeric value preserves precision and
+    # the exact textual representation -- the consumer can convert the
+    # text to whatever native numeric type is appropriate.
+    #
+    # How it works: it remembers the start index, optionally consumes a
+    # leading plus or minus sign, then parses the integer portion.  A
+    # leading zero is followed by no more digits (an immediately
+    # following digit triggers "leading zero not allowed"); any other
+    # leading digit starts a run of digits.  An optional fraction begins
+    # with a period and requires at least one digit after it.  An
+    # optional exponent begins with "e" or "E", may include a sign, and
+    # also requires at least one digit.  At each step, end of input or a
+    # non-digit when one was required raises a descriptive error.  On
+    # success the slice from the start index up to but not including the
+    # final cursor is returned.
+    #
+    # Tricky details: a leading plus sign is accepted even though strict
+    # JSON does not permit it -- this matches the behavior of
+    # [jsonParseValue], which dispatches to this routine when it sees one.
+    # The result is the original textual lexeme; no normalization, range
+    # checking, or numeric conversion is performed.  Callers that want a
+    # numeric value should pass the result through expr or scan.  The
+    # cursor is advanced to the first character after the number on
+    # success, or left at the offending position on failure.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   first character of the number (sign or digit).
+    #
+    # Results:
+    #   The string slice that constitutes the number lexeme.  Errors
+    #   are raised on malformed numeric syntax.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set length [string length $json]
@@ -470,6 +975,40 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseBoolean { json indexVarName } {
+    # <help>
+    # This procedure parses a JSON boolean literal -- either "true" or
+    # "false" -- starting at the caller's current cursor position and
+    # returns the matching Tcl boolean string.  It is invoked by
+    # [jsonParseValue] after it has peeked at a "t" or "f" at the current
+    # position.
+    #
+    # How it works: it checks whether the next four characters spell
+    # "true" or the next five spell "false" using a length-bounded
+    # string range comparison.  On a match the cursor is advanced by the
+    # length of the keyword and the literal "true" or "false" is
+    # returned.  If neither matches, an "expected boolean literal" error
+    # is raised at the current index.
+    #
+    # Tricky details: the length checks use $index + 3 < $length (and
+    # $index + 4 < $length for "false"), which means a buffer that ends
+    # exactly with the boolean keyword and nothing after it will fail
+    # this check; in practice that does not matter for top-level use
+    # because the document is always one parsed value plus optional
+    # trailing whitespace, but callers should be aware of the off-by-one
+    # if they reuse this internally.  The match is case sensitive in
+    # accordance with the JSON specification.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   "t" or "f" that begins the literal.
+    #
+    # Results:
+    #   The literal string "true" or "false".  Errors are raised on
+    #   malformed input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set length [string length $json]
@@ -486,6 +1025,43 @@ namespace eval ::Eagle {
   }
 
   proc jsonParseNull { json indexVarName } {
+    # <help>
+    # This procedure parses a JSON null literal starting at the caller's
+    # current cursor position and returns a Tcl-side stand-in for JSON
+    # null.  It is invoked by [jsonParseValue] after it has peeked at an
+    # "n" at the current position.
+    #
+    # How it works: it confirms that the next four characters spell
+    # "null", advances the cursor four positions, and returns whatever
+    # value the global ::null variable holds at the time of the call.
+    # If ::null does not exist, the empty string is returned instead so
+    # that the parser remains usable without any external setup.  If the
+    # four characters are not "null", an "expected null literal" error
+    # is raised at the current index.
+    #
+    # Tricky details: this is the only place where the parser produces
+    # an output that depends on caller-side configuration rather than on
+    # the input -- callers who care to distinguish JSON null from JSON
+    # empty string can set ::null to some sentinel object (typically a
+    # null object handle in Eagle) before parsing.  The length check
+    # uses $index + 3 < $length, which means a document that ends
+    # exactly with "null" fails the check; in practice this matters
+    # only if the function is reused outside its normal context, since
+    # the top-level driver always tolerates trailing whitespace and
+    # therefore the buffer always extends past the literal.  The match
+    # is case sensitive in accordance with the JSON specification.
+    #
+    # Arguments:
+    #   json         -- The complete JSON document being parsed.
+    #   indexVarName -- The name (in the caller's frame) of the integer
+    #                   cursor variable.  Must currently point at the
+    #                   "n" that begins the literal.
+    #
+    # Results:
+    #   The value of ::null if it exists, otherwise the empty string.
+    #   Errors are raised on malformed input.
+    # </help>
+
     upvar 1 $indexVarName index
 
     set length [string length $json]
