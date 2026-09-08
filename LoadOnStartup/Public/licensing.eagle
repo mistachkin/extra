@@ -684,7 +684,7 @@ namespace eval ::Licensing {
 
             if {!$quiet} then {
               host result Ok [appendArgs \
-                  $level ": Enabled encrypted  development certificate \"" \
+                  $level ": Enabled encrypted development certificate \"" \
                   $fileName "\" for package \"" $packageName \".\n]
             }
           }

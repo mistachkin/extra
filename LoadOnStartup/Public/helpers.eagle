@@ -351,7 +351,7 @@ namespace eval :: {
     if {[file exists $fileName]} then {
       uplevel #0 [list \
           package ifneeded Eagle.Test 1.0 \
-          [list sourceWithInfo $fileName]]
+          [list sourceWithInfo -library true -- $fileName]]
 
       if {[catch {
         package present Eagle.Test
