@@ -19,29 +19,38 @@ if {![package vsatisfies [package provide Eagle] 1.0]} then {return}
 
 ###############################################################################
 
-package ifneeded Eagle.History 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir history.eagle]]
+package ifneeded Eagle.History 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir history.eagle]]
 
-package ifneeded Eagle.Secrets 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir secrets.eagle]]
+package ifneeded Eagle.Secrets 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir secrets.eagle]]
 
-package ifneeded Eagle.Chat 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir chat.eagle]]
+package ifneeded Eagle.Chat 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir chat.eagle]]
 
-package ifneeded Eagle.Execute.Pipes 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir execPipes.eagle]]
+package ifneeded Eagle.Execute.Pipes 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir execPipes.eagle]]
 
-package ifneeded Eagle.Sms 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir sms.eagle]]
+package ifneeded Eagle.Sms 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir sms.eagle]]
 
-package ifneeded Eagle.Licensing 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir licensing.eagle]]
+package ifneeded Eagle.Licensing 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir licensing.eagle]]
 
-package ifneeded Eagle.Mathematica 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir mathematica.eagle]]
+package ifneeded Eagle.Mathematica 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir mathematica.eagle]]
 
-package ifneeded Eagle.JSON 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir json.eagle]]
+package ifneeded Eagle.JSON 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir json.eagle]]
 
-package ifneeded Zeus.Update 1.0 \
-    [list sourceWithInfo -library true -- [file join $dir checkUpdateZeusHook.eagle]]
+package ifneeded Zeus.Update 1.0 [list \
+    sourceWithInfo -library true -package true -- \
+    [file join $dir checkUpdateZeusHook.eagle]]
